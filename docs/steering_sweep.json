@@ -1,0 +1,58 @@
+[
+  {
+    "max_steer_deg": 30,
+    "min_turn_radius_cm": 8.7,
+    "tracking_error_mean_cm": 0.08,
+    "tracking_error_max_cm": 0.2,
+    "min_gap_to_post_cm": 8.8,
+    "ok": true
+  },
+  {
+    "max_steer_deg": 20,
+    "min_turn_radius_cm": 13.7,
+    "tracking_error_mean_cm": 0.08,
+    "tracking_error_max_cm": 0.2,
+    "min_gap_to_post_cm": 8.8,
+    "ok": true
+  },
+  {
+    "max_steer_deg": 15,
+    "min_turn_radius_cm": 18.7,
+    "tracking_error_mean_cm": 0.33,
+    "tracking_error_max_cm": 2.33,
+    "min_gap_to_post_cm": 8.8,
+    "ok": true
+  },
+  {
+    "max_steer_deg": 12,
+    "min_turn_radius_cm": 23.5,
+    "tracking_error_mean_cm": 1.82,
+    "tracking_error_max_cm": 9.34,
+    "min_gap_to_post_cm": 8.8,
+    "ok": true
+  },
+  {
+    "max_steer_deg": 11,
+    "min_turn_radius_cm": 25.7,
+    "tracking_error_mean_cm": 4.37,
+    "tracking_error_max_cm": 17.01,
+    "min_gap_to_post_cm": 7.3,
+    "ok": true
+  },
+  {
+    "max_steer_deg": 10,
+    "min_turn_radius_cm": 28.4,
+    "tracking_error_mean_cm": 13.58,
+    "tracking_error_max_cm": 38.87,
+    "min_gap_to_post_cm": -5.6,
+    "ok": false
+  },
+  {
+    "max_steer_deg": 8,
+    "min_turn_radius_cm": 35.6,
+    "tracking_error_mean_cm": 28.25,
+    "tracking_error_max_cm": 51.13,
+    "min_gap_to_post_cm": -3.4,
+    "ok": false
+  }
+]
