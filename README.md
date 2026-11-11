@@ -124,10 +124,36 @@ Folder `data/lidar_drive/`, statistics in [`docs/lidar_dataset_stats.json`](docs
 |---|---|
 | Duration / frames | 48.5 s, 1661 frames (34 per second) |
 | Depth confidence | low 40 %, medium 43 %, **high 17 %** of the pixels |
-| Distance of high-confidence points | median 1.9 m (the pipeline only uses points closer than 2 m) |
+| Points used for the map | high confidence and closer than 2 m (see below why) |
 | Phone path | **10.6 m**; ends **9.7 cm** from where it started |
 | Phone height above the ground | ≈ 5 cm, varied by 12 cm during the drive |
 | Phone speed | 22 cm/s on average |
+
+### Distances and confidence of the depth pixels
+
+Statistics of 16.4 million depth pixels (every 5th frame), made by
+`scripts/lidar_dataset_stats.py`:
+
+![depth histograms](docs/images/lidar/depth_histograms.png)
+
+| | Value |
+|---|---|
+| Median distance of a depth pixel | **0.67 m** (25 % are closer than 15 cm) |
+| Pixels closer than 2 m | **64 %** |
+| Confidence of all pixels | low 40 %, medium 44 %, high **17 %** |
+| High confidence at 0.5–2 m | 20–29 % — the best range |
+| High confidence at 2–3.5 m | only 5–12 % — the worst range |
+
+What this shows:
+
+* **Most points are close**: the phone was only ≈ 5 cm above the ground, so a big part of
+  every frame is the floor right in front of it.
+* That floor is seen at a **very flat angle**, so its pixels are mostly *medium* confidence.
+* **High confidence** is most common for things **0.5–2 m away facing the phone** — exactly the
+  posts. Between 2 and 3.5 m it drops to 5–12 %. Beyond 4 m only large flat surfaces (fence,
+  wall) get high confidence again, and there the iPhone LiDAR is no longer accurate in distance
+  (in a first test with points up to 2.5 m, far points smeared the map into streaks).
+* That is why the map uses **only high-confidence points closer than 2 m**.
 
 **Hand measurements** (tape measure, approximate): 5 posts, ≈ 53 cm apart, corridor 1 m,
 start mark 93 cm before post 1, last post → wall 62 cm, post diameter ≈ 7 cm.
@@ -229,7 +255,14 @@ max steering 30° → smallest turn radius 8.7 cm), *pure pursuit* controller. D
 | Last post → wall | **64 cm** | 62 cm |
 | Post spacing | 66 / 64 / 60 / 54 cm, mean **61 cm** | ≈ 53 cm |
 | Start of recording → post 1 | 119 cm | 93 cm (the recording started before the start mark) |
-| Ground flatness | 2 cm | — |
+| Ground flatness | ±2 cm | — |
+| Post height | 21–23 cm | — |
+
+**Side view of the LiDAR map** (only the corridor, |y| < 50 cm): the ground is flat within
+±2 cm, the five posts stick out 21–23 cm, the wall is at the end. The tall things near the
+start (x ≈ 30–40 cm) are outside the line of posts and were rejected.
+
+![side view](docs/images/lidar/side_view.png)
 
 ### Plan vs the real drive
 

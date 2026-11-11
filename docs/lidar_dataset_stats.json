@@ -25,5 +25,33 @@
   "files_mb": {
     "depth": 45,
     "confidence": 13
+  },
+  "depth_histograms": {
+    "depth_pixels_sampled": 16367616,
+    "distance_m_percentiles_10_25_50_75_90": [
+      0.1,
+      0.15,
+      0.67,
+      3.62,
+      5.87
+    ],
+    "share_closer_than_2m_percent": 64.1,
+    "confidence_share_percent_low_med_high": [
+      39.9,
+      43.6,
+      16.6
+    ],
+    "high_confidence_percent_closer_than_2m": 13.4,
+    "high_confidence_percent_from_2m": 22.1
+  },
+  "side_view": {
+    "ground_thickness_cm": 1.96,
+    "post_heights_cm_p95": [
+      23.2,
+      23.0,
+      21.4,
+      21.9,
+      21.8
+    ]
   }
 }
