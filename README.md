@@ -18,10 +18,6 @@ front camera.
 | ![plan](docs/images/slalom_plan.png) | ![drive](docs/images/sim_realistic.gif) |
 
 
-## AI assistance. 
-Code was written with the help of Claude (Anthropic) as a programming assistant. 
-The task, the track design, all data collection (photos, video, iPhone LiDAR recording) and the decisions on what to test - Milka Kaplan.
-Reviewed and ran every step was by Milka Kaplan.
 ---
 
 ## Contents
@@ -385,11 +381,13 @@ That would need coloured posts or a trained detector.
   width only. Real errors will be larger than in the simulation.
 * **Video detection** depends on the light and fails with a busy background.
 
+___
 
 ## AI assistance. 
 Code was written with the help of Claude (Anthropic) as a programming assistant. 
 The task, the track design, all data collection (photos, video, iPhone LiDAR recording) and the decisions on what to test - Milka Kaplan.
 Reviewed and ran every step was by Milka Kaplan.
+
 ---
 
 ## Repository layout
