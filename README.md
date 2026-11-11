@@ -146,7 +146,7 @@ are needed here only as the reference to compare with.)
 ## How the explorer works
 
 Code: `ros2_ws/src/minicar_simulator/minicar_simulator/explorer.py`, node `explorer_node`.
-Every **0.05 s** the car does what a self-driving car does — **look → understand → decide → drive**.
+Every **0.05 s** the car does what a self-driving car does - **look → understand → decide → drive**.
 
 **1. Look - its own virtual LiDAR.**
 * range **2 m**, field of view **60°** (like the iPhone LiDAR);
@@ -175,7 +175,7 @@ controller aiming 6 cm ahead on the current plan. The car looks 20 times a secon
 
 **Safety margin.** A post seen from one side is known less precisely (up to ~9 cm). With a gap
 of 10 cm the explorer passed two posts at ~1 cm, so on an unknown track it keeps
-**13 cm** — like a careful driver on a road they don't know.
+**13 cm** - like a careful driver on a road they don't know.
 
 **Solving it step by step** (each problem found by looking at the result):
 
@@ -283,7 +283,7 @@ different random noise:
 (branch `lidar-v2`).
 
 **The car found the whole track by itself, under wind and with noisy sensors, and drove it
-only ~5 % longer than a car that knew the track in advance — as long as its position sensor
+only ~5 % longer than a car that knew the track in advance - as long as its position sensor
 is accurate to about 1 cm.**
 
 This is a **rule-based** robot (perception → planning → control), not machine learning:
