@@ -6,7 +6,7 @@
 > simulated car with wind and variable speed drives on the LiDAR map - is in branch
 > [**`lidar-v2`**](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v2).
 >
-> A SUB-SECOND variant with simulation of a car that **does not know** the route and its trajectory on the LiDAR map - in the section
+> A THIRD variant with simulation of a car that **does not know** the route and its trajectory on the LiDAR map - in the section
 > [**`lidar-v3`**](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v3)
 
 A toy autonomous-driving pipeline: a small car has to drive a **slalom between 4 posts,
