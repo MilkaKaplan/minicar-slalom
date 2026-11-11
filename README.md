@@ -3,6 +3,9 @@
 > **This is the LiDAR variant of the project.**
 > The camera variant (top-view photo + drive video) is in branch
 > [`main`](https://github.com/MilkaKaplan/minicar-slalom/tree/main).
+>
+> > simulation of a car that **does not know** the route and its trajectory on the LiDAR map - in the section
+> [**`lidar-v3`**](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v3)
 
 
 A small car has to drive a **slalom between posts, turn around at the end and slalom back**
