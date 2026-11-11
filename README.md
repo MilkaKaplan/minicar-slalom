@@ -2,8 +2,11 @@
 
 > **Branch `lidar-v3`.** A simulated car drives a slalom track it has **never seen before** and
 > finds its way by itself.
+> 
 > Other variants of this project: the camera (branch
-> [`main`](https://github.com/MilkaKaplan/minicar-slalom/tree/main)) and the LiDAR map of a track
+> [`main`](https://github.com/MilkaKaplan/minicar-slalom/tree/main))
+>
+> and the LiDAR map of a track
 > driven in advance (branch [`lidar-v2`](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v2)).
 
 At a competition the car arrives at a track nobody has measured for it. It has to **find the
