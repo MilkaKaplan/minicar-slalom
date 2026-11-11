@@ -1,5 +1,13 @@
 # Minicar Slalom — a ROS 2 Jazzy pipeline in Docker
 
+> **Two versions of this project**
+> * branch [`main`](https://github.com/MilkaKaplan/minicar-slalom/tree/main) — **camera**: the track is
+>   found on a top-view photo (needs the known post spacing for the scale);
+> * branch [`lidar-v2`](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v2) (this one) — everything
+>   from `main` **plus an iPhone LiDAR version**: the track is measured by the sensor itself, no
+>   measurements needed, and the simulated car drives on the LiDAR map
+>   ([jump to it](#extra-iphone-lidar--a-track-nobody-measured-for-us)).
+
 A toy autonomous-driving pipeline: a small car has to drive a **slalom between 4 posts,
 turn around at the end and slalom back** inside a 1 m wide corridor.
 
@@ -391,6 +399,8 @@ app while driving the phone ≈ 5–10 cm above the ground: there, U-turn, back.
  │  (plays the recording like     │ /phone/pose        │  → plan slalom → compare with real drive │
  │   live sensors)                │ /phone/camera_info │  ─► /slalom/path, /posts, /limits ─┐     │
  └────────────────────────────────┘                    │ car_simulator ◄──────────────────────┘   │
+                                                       │   └─► /sim/driven_path ─► lidar_mapper   │
+                                                       │       (draws the car on the LiDAR map)   │
                                                        └──────────────────────────────────────────┘
 ```
 
@@ -425,6 +435,12 @@ docker compose --profile lidar up --build --exit-code-from lidar_processing lida
 | Tightest turn | 16–19 cm |
 | **Real drive vs plan** (the phone's path) | **6.7 cm** apart on average, 21 cm at most |
 | Simulated realistic car | max 1.0 cm from the path, ≥ 9.1 cm from every post, no collision |
+
+**The simulated car driving the planned slalom on the LiDAR map** (orange), next to the
+path the phone really took (blue). The mapper sends the plan to the car simulator, gets the
+simulated drive back over `/sim/driven_path` and draws it on the map (`results/lidar/lidar_drive.gif`):
+
+<img src="docs/images/lidar/lidar_drive.gif" width="360">
 
 ![lidar sim](docs/images/lidar/sim_realistic.png)
 

@@ -311,3 +311,57 @@ def _style(a, track, res):
     a.set_xlabel("y, sideways [cm] (+ = left)")
     a.set_ylabel("x, forward from start [cm]")
     a.grid(alpha=0.3)
+
+
+def save_drive_animation(res, parts, track, car_xy_cm, out_gif, car_half_width_cm=2.5,
+                         car_length_cm=8.0, frames=120, fps=12):
+    """GIF: the simulated car drives the planned slalom ON the LiDAR map of the yard,
+    next to the path the phone really took."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation, PillowWriter
+    from matplotlib.patches import Polygon
+
+    P, h = res["points"], res["height"]
+    t = res["to_track"](P[:, [0, 2]]) * 100
+    keep = (t[:, 0] > -30) & (t[:, 0] < 480) & (np.abs(t[:, 1]) < 90)
+    ground = keep & (np.abs(h) < 0.03)
+    above = keep & (h > 0.03) & (h < 0.6)
+    posts = res["posts_track_m"] * 100
+    drive = res["drive_track_m"] * 100
+    car = np.asarray(car_xy_cm, dtype=float)
+
+    fig, ax = plt.subplots(figsize=(5, 9))
+    ax.scatter(t[ground, 1][::10], t[ground, 0][::10], s=0.3, c="#dddddd")
+    ax.scatter(t[above, 1], t[above, 0], s=0.5, c=h[above] * 100, cmap="viridis", vmin=0, vmax=40)
+    for px, py in posts:
+        ax.add_patch(plt.Circle((py, px), track["post_r"], color="red"))
+    if res["wall_x_m"]:
+        ax.axhline(res["wall_x_m"] * 100, c="brown", lw=3)
+    for name, (x, y) in parts.items():
+        ax.plot(y, x, "--", c="black", lw=0.8)
+    ax.plot(drive[:, 1], drive[:, 0], c="deepskyblue", lw=1, alpha=0.6, label="real drive (phone)")
+    trail, = ax.plot([], [], c="orange", lw=2.5, label="simulated car")
+    body = Polygon(np.zeros((4, 2)), closed=True, fc="orange", ec="black", zorder=5)
+    ax.add_patch(body)
+    title = ax.set_title("")
+    _style(ax, track, res)
+    ax.legend(loc="lower left", fontsize=7)
+
+    heading = np.arctan2(np.gradient(car[:, 1]), np.gradient(car[:, 0]))
+    steps = np.linspace(0, len(car) - 1, frames).astype(int)
+    w, L = car_half_width_cm, car_length_cm
+
+    def update(i):
+        k = steps[i]
+        c, s = np.cos(heading[k]), np.sin(heading[k])
+        corners = np.array([[-L / 2, -w], [L / 2, -w], [L / 2, w], [-L / 2, w]])
+        xy = corners @ np.array([[c, s], [-s, c]]) + car[k]
+        body.set_xy(xy[:, ::-1])                       # plot is (y, x)
+        trail.set_data(car[: k + 1, 1], car[: k + 1, 0])
+        title.set_text(f"Car on the LiDAR map  ({100 * k // (len(car) - 1)} %)")
+        return body, trail, title
+
+    FuncAnimation(fig, update, frames=frames, blit=False).save(out_gif, writer=PillowWriter(fps=fps))
+    plt.close(fig)

@@ -1,8 +1,8 @@
 """LiDAR version, container 2: the map builder and the car simulator.
 
 The mapper builds the map from the phone's LiDAR stream, finds the posts and the wall,
-plans the slalom and publishes it; the simulator drives it. The launch stops when the
-simulator has finished.
+plans the slalom and publishes it; the simulator drives it and sends the drive back;
+the mapper draws the car on the LiDAR map. The launch stops when the mapper has finished.
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
@@ -28,7 +28,7 @@ def generate_launch_description():
         parameters=[{"output_dir": "/results/lidar", "wait_for_limits": True,
                      "post_radius_cm": 3.5, "max_steer_deg": LaunchConfiguration("max_steer_deg")}],
     )
-    stop_when_simulator_ends = RegisterEventHandler(
-        OnProcessExit(target_action=simulator, on_exit=[EmitEvent(event=Shutdown())])
+    stop_when_mapper_ends = RegisterEventHandler(
+        OnProcessExit(target_action=mapper, on_exit=[EmitEvent(event=Shutdown())])
     )
-    return LaunchDescription(args + [mapper, simulator, stop_when_simulator_ends])
+    return LaunchDescription(args + [mapper, simulator, stop_when_mapper_ends])

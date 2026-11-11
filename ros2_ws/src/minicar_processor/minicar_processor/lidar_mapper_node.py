@@ -8,7 +8,9 @@ When the stream stops it:
   * plans the slalom there + U-turn + back through the detected posts;
   * compares the real drive (the phone's path) with the plan;
   * saves lidar_map.png, lidar_result.json, path.csv into output_dir;
-  * publishes /slalom/path, /slalom/posts and /slalom/limits for the car simulator.
+  * publishes /slalom/path, /slalom/posts and /slalom/limits for the car simulator;
+  * waits for the simulated drive (/sim/driven_path) and draws the car driving on the
+    LiDAR map: lidar_drive.gif. Then it exits.
 """
 import csv
 import json
@@ -41,7 +43,7 @@ class LidarMapper(Node):
         super().__init__("lidar_mapper")
         self.declare_parameter("output_dir", "/results/lidar")
         self.declare_parameter("idle_timeout_s", 3.0)
-        self.declare_parameter("linger_s", 10.0)
+        self.declare_parameter("wait_for_sim_s", 120.0)   # how long to wait for the simulated drive
         # what we know in advance: OUR car and the RULES. Everything else is measured.
         self.declare_parameter("car_width_cm", 5.0)
         self.declare_parameter("gap_cm", 10.0)
@@ -70,6 +72,9 @@ class LidarMapper(Node):
         self.pub_path = self.create_publisher(Path, "/slalom/path", latched)
         self.pub_posts = self.create_publisher(PoseArray, "/slalom/posts", latched)
         self.pub_limits = self.create_publisher(Float32MultiArray, "/slalom/limits", latched)
+        self.create_subscription(Path, "/sim/driven_path", self.on_sim_drive, latched)
+        self.sim_drive_cm = None
+        self.plan = None
         self.get_logger().info("Waiting for the phone's LiDAR stream ...")
 
     def on_info(self, msg):
@@ -95,9 +100,22 @@ class LidarMapper(Node):
             if self.n_added % 100 == 0:
                 self.get_logger().info(f"{self.n_added} frames added to the map")
 
+    def on_sim_drive(self, msg):
+        self.sim_drive_cm = np.array([[ps.pose.position.x, ps.pose.position.y] for ps in msg.poses]) * 100
+
     def tick(self):
         if self.finished_at is not None:
-            if time.time() - self.finished_at > self.get_parameter("linger_s").value:
+            if self.sim_drive_cm is not None and self.plan is not None:
+                res, parts, track = self.plan
+                self.get_logger().info(f"Got the simulated drive ({len(self.sim_drive_cm)} points), "
+                                       "drawing it on the LiDAR map ...")
+                lm.save_drive_animation(res, parts, track, self.sim_drive_cm,
+                                        os.path.join(self.out_dir, "lidar_drive.gif"),
+                                        car_half_width_cm=self.car["half_width"])
+                self.get_logger().info("Wrote lidar_drive.gif. Done.")
+                self.done = True
+            elif time.time() - self.finished_at > self.get_parameter("wait_for_sim_s").value:
+                self.get_logger().warn("No simulated drive received, exiting without lidar_drive.gif")
                 self.done = True
             return
         if self.last_at and time.time() - self.last_at > self.get_parameter("idle_timeout_s").value:
@@ -180,6 +198,7 @@ class LidarMapper(Node):
             w.writerow(["part", "x_cm", "y_cm"])
             w.writerows(core.path_rows(parts))
         self.get_logger().info(f"Wrote lidar_map.png, lidar_result.json, path.csv to {self.out_dir}")
+        self.plan = (res, parts, track)
 
 
 def main(args=None):
