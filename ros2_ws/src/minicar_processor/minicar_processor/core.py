@@ -118,11 +118,12 @@ def half_cosine(x0, y0, x1, y1, n=400):
     return x, y0 + (y1 - y0) * (1 - np.cos(np.pi * t)) / 2
 
 
-def plan_path(posts_cm, track, car):
-    """There: pass post 1 on the left, post 2 on the right, ...  U-turn around the last post.
-    Back: every post on the other side. Returns dict part -> (x, y)."""
+def plan_path(posts_cm, track, car, first_side=1):
+    """There: pass post 1 on the left (first_side=+1) or right (-1), then alternate.
+    U-turn around the last post. Back: every post on the other side.
+    Returns dict part -> (x, y)."""
     A = track["post_r"] + car["gap"] + car["half_width"]       # swing from the post centre
-    side = np.array([1 if i % 2 == 0 else -1 for i in range(len(posts_cm))])   # +1 = left
+    side = np.array([first_side if i % 2 == 0 else -first_side for i in range(len(posts_cm))])  # +1 = left
     way_there = np.column_stack([posts_cm[:, 0], posts_cm[:, 1] + side * A])
 
     xs, ys = [], []

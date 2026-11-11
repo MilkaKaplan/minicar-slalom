@@ -1,0 +1,13 @@
+{
+  "note": "Measured by hand in the yard. Used ONLY to check the lidar results, never as input.",
+  "posts": 5,
+  "post_spacing_cm": 53,
+  "post_spacing_note": "approximate",
+  "corridor_width_cm": 100,
+  "start_to_post1_cm": 93,
+  "post_diameter_cm": 7,
+  "post_diameter_note": "approximate",
+  "last_post_to_wall_cm": 62,
+  "place": "paved yard, outdoors",
+  "recorded_with": "iPhone LiDAR, Stray Scanner app (depth 256x192, confidence, ARKit poses)"
+}

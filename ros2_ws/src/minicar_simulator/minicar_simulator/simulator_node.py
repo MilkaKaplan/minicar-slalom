@@ -25,6 +25,7 @@ from nav_msgs.msg import Path
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Float32MultiArray
 
 from . import sim
 
@@ -51,6 +52,8 @@ class CarSimulator(Node):
         self.declare_parameter("post_radius_cm", 6.5)
         self.declare_parameter("half_corridor_cm", 50.0)
         self.declare_parameter("last_post_to_wall_cm", 50.0)
+        # LiDAR version: post radius, corridor and wall come from the map on /slalom/limits
+        self.declare_parameter("wait_for_limits", False)
 
         p = lambda name: self.get_parameter(name).value  # noqa: E731
         self.car = {"half_width": p("car_width_cm") / 2, "wheelbase": p("wheelbase_cm"),
@@ -61,6 +64,7 @@ class CarSimulator(Node):
         self.out_dir = p("output_dir")
         self.path_cm = None
         self.posts_cm = None
+        self.limits = None              # (post_radius_cm, half_corridor_cm, wall_x_cm) from the map
         self.done = False
 
         latched = QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=1,
@@ -68,6 +72,7 @@ class CarSimulator(Node):
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(Path, "/slalom/path", self.on_path, latched)
         self.create_subscription(PoseArray, "/slalom/posts", self.on_posts, latched)
+        self.create_subscription(Float32MultiArray, "/slalom/limits", self.on_limits, latched)
         self.pub = self.create_publisher(Path, "/sim/driven_path", latched)
         self.get_logger().info(
             f"Car: width {self.car['half_width'] * 2} cm, wheelbase {self.car['wheelbase']} cm, "
@@ -81,6 +86,10 @@ class CarSimulator(Node):
     def on_posts(self, msg):
         self.posts_cm = np.array([[p.position.x, p.position.y] for p in msg.poses]) * 100
         self.try_run(msg.header)
+
+    def on_limits(self, msg):
+        self.limits = tuple(float(v) for v in msg.data[:3])
+        self.try_run(None)
 
     def drive(self, name, realism, track):
         """One drive: simulate, evaluate, save picture (+ GIF). Returns (log, numbers)."""
@@ -102,11 +111,16 @@ class CarSimulator(Node):
     def try_run(self, header):
         if self.done or self.path_cm is None or self.posts_cm is None:
             return
+        if self.get_parameter("wait_for_limits").value and self.limits is None:
+            return
         self.get_logger().info(f"Got path ({len(self.path_cm)} points) and {len(self.posts_cm)} posts, driving ...")
         os.makedirs(self.out_dir, exist_ok=True)
-        track = (self.get_parameter("post_radius_cm").value,
-                 self.get_parameter("half_corridor_cm").value,
-                 self.posts_cm[:, 0].max() + self.get_parameter("last_post_to_wall_cm").value)
+        if self.limits is not None:
+            track = self.limits
+        else:
+            track = (self.get_parameter("post_radius_cm").value,
+                     self.get_parameter("half_corridor_cm").value,
+                     self.posts_cm[:, 0].max() + self.get_parameter("last_post_to_wall_cm").value)
 
         _, ideal = self.drive("ideal", sim.IDEAL, track)
         log, realistic = self.drive("realistic", self.realistic, track)
@@ -125,7 +139,7 @@ class CarSimulator(Node):
 
         # publish the realistic trajectory (every 10th step, metres)
         out = Path()
-        out.header.stamp = header.stamp
+        out.header.stamp = self.get_clock().now().to_msg()
         out.header.frame_id = "track"
         for x, y in zip(log["x"][::10], log["y"][::10]):
             ps = PoseStamped()

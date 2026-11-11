@@ -27,3 +27,9 @@ for k, t in enumerate(tiles):
 out.save("docs/images/video_detections_strip.png")
 PY
 echo "docs/images updated"
+# LiDAR version (branch lidar-v2), after: docker compose --profile lidar up ...
+if [ -d results/lidar ]; then
+  mkdir -p docs/images/lidar
+  cp results/lidar/lidar_map.png results/lidar/sim_realistic.png results/lidar/sim_robustness.png \
+     results/lidar/sim_realistic.gif docs/images/lidar/
+fi

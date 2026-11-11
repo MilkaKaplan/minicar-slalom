@@ -69,6 +69,43 @@ services:
     command: ["/ros2_ws/install/minicar_processor/lib/minicar_processor/video_checker_node", "--ros-args",
               "-p", "output_dir:=/results/video"]
 
+  # ---------------------------------------------------------------------------
+  # LIDAR VERSION (extra, branch lidar-v2). iPhone LiDAR recording of a slalom in a yard.
+  #   docker compose --profile lidar up --build --exit-code-from lidar_processing lidar_replay lidar_processing
+  # Container 1 replays the recording (depth + confidence + phone pose), container 2 builds
+  # a 3D map, finds posts and wall WITHOUT track measurements, plans the slalom, compares it
+  # with the real drive and simulates a car. Results go to results/lidar/.
+  lidar_replay:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.publisher
+    image: minicar/publisher:jazzy
+    profiles: ["lidar"]
+    environment: *ros-env
+    volumes:
+      - ./data:/data:ro
+    networks: [ros]
+    init: true
+    stop_signal: SIGINT
+    command: ["/ros2_ws/install/minicar_publisher/lib/minicar_publisher/lidar_replay_node", "--ros-args",
+              "-p", "recording_dir:=/data/lidar_drive", "-p", "every_nth:=2", "-p", "rate_hz:=30.0"]
+
+  lidar_processing:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.processor
+    image: minicar/processor:jazzy
+    profiles: ["lidar"]
+    environment: *ros-env
+    volumes:
+      - ./data:/data:ro          # only for the optional hand measurements (accuracy report)
+      - ./results:/results
+    depends_on: [lidar_replay]
+    networks: [ros]
+    init: true
+    stop_signal: SIGINT
+    command: ["ros2", "launch", "/ros2_ws/lidar.launch.py"]
+
   # Dataset statistics for the README (not part of the pipeline, run on demand):
   #   docker compose run --rm stats
   stats:

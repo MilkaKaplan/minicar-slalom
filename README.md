@@ -22,6 +22,7 @@ front camera.
 - [How it works](#how-it-works)
 - [Results](#results)
 - [Extra: the drive video as a front camera](#extra-the-drive-video-as-a-front-camera)
+- [Extra: iPhone LiDAR — a track nobody measured for us](#extra-iphone-lidar--a-track-nobody-measured-for-us)
 - [Limitations](#limitations)
 - [Repository layout](#repository-layout)
 
@@ -55,6 +56,9 @@ Other commands:
 ```bash
 # Extra: the drive video as a front-camera stream (results in results/video/)
 docker compose --profile video up --build --exit-code-from video_checker video_publisher video_checker
+
+# Extra: iPhone LiDAR recording, map built without track measurements (results in results/lidar/)
+docker compose --profile lidar up --build --exit-code-from lidar_processing lidar_replay lidar_processing
 
 # Dataset statistics and figures (writes docs/)
 docker compose run --rm stats
@@ -363,6 +367,80 @@ That would need coloured posts or a trained detector.
 
 ---
 
+## Extra: iPhone LiDAR — a track nobody measured for us
+
+The main pipeline needs to know the track (posts 50 cm apart) to get its scale. On a
+competition track nobody tells you that. In this version the system **measures everything
+itself** from the iPhone's LiDAR; known in advance are only **our car** (5 cm wide, wanted
+gap 10 cm) and the **rules** (corridor 1 m wide).
+
+**Data** (`data/lidar_drive/`): a new slalom in a paved yard — 5 paper posts (Ø ≈ 7 cm),
+recorded with the [Stray Scanner](https://apps.apple.com/app/stray-scanner/id1557051662)
+app while driving the phone ≈ 5–10 cm above the ground: there, U-turn, back.
+48 s, 1661 frames of **depth** (256 × 192, mm), **confidence** (low/medium/high) and the
+**phone pose** from ARKit (position + orientation). Hand measurements are in
+`measurements.json` and are used **only to check** the result.
+
+<img src="docs/images/lidar/polycam_top_view.jpg" width="300"> <br>
+*The same track scanned with Polycam (for illustration only).*
+
+```
+ ┌── container 1 ─────────────────┐            ┌── container 2 ─────────────────────────────────┐
+ │ lidar_replay                   │ /phone/depth       │ lidar_mapper                            │
+ │  data/lidar_drive/ ────────────┼ /phone/confidence ►│  frames → 3D map → ground → posts → wall │
+ │  (plays the recording like     │ /phone/pose        │  → plan slalom → compare with real drive │
+ │   live sensors)                │ /phone/camera_info │  ─► /slalom/path, /posts, /limits ─┐     │
+ └────────────────────────────────┘                    │ car_simulator ◄──────────────────────┘   │
+                                                       └──────────────────────────────────────────┘
+```
+
+```bash
+docker compose --profile lidar up --build --exit-code-from lidar_processing lidar_replay lidar_processing
+# results in results/lidar/
+```
+
+**How the map is built** (`minicar_processor/lidar_map.py`):
+
+1. every depth pixel → 3D point in the camera (focal length from `camera_info`) → 3D point
+   in the world (phone pose). Only high-confidence points closer than 2 m.
+2. **ground** = the most common height + a fitted plane (thickness 2 cm);
+3. **posts** = compact things 5–40 cm above the ground near the drive; pieces of one object
+   are merged, and only candidates **standing in one line** are kept (7 candidates → 5 posts);
+4. **wall** = the first obstacle behind the last post that is at least 50 cm wide;
+5. the slalom is planned with the same planner as the main pipeline, the car simulator drives it.
+
+![lidar map](docs/images/lidar/lidar_map.png)
+
+| | LiDAR (automatic) | Hand measurement |
+|---|---|---|
+| Posts | **5** | 5 |
+| Post spacing | 66 / 64 / 60 / 54 cm, mean **61 cm** | ≈ 53 cm |
+| Last post → wall | **64 cm** | 62 cm |
+| Start of recording → post 1 | 119 cm | 93 cm (the recording started before the start mark) |
+| Ground flatness | 2 cm | — |
+
+| Result | Value |
+|---|---|
+| Planned path: smallest gap to a post | 10.0 cm, corridor edge 23.8 cm, wall 45.5 cm |
+| Tightest turn | 16–19 cm |
+| **Real drive vs plan** (the phone's path) | **6.7 cm** apart on average, 21 cm at most |
+| Simulated realistic car | max 1.0 cm from the path, ≥ 9.1 cm from every post, no collision |
+
+![lidar sim](docs/images/lidar/sim_realistic.png)
+
+**Honest notes**
+
+* The wall distance matches the tape measure (64 vs 62 cm), but the post spacing comes out
+  ~15 % longer (61 vs 53 cm) and uneven (54–66 cm), while the Polycam scan shows evenly
+  spaced posts. The phone's own position (ARKit) drifts when it is carried very low over a
+  uniform paved floor — there is little texture for it to track.
+* Each post is seen from both sides (there and back); with the drift its two halves land a
+  few cm apart, so post centres are only accurate to ~3–5 cm.
+* The phone itself passed post 4 closer than a 5 cm car would be allowed to — the human
+  "driver" was less careful than the planner.
+
+---
+
 ## Limitations
 
 * **Small, compressed data**: one top-view photo and one video, both compressed by WhatsApp.
@@ -386,13 +464,15 @@ That would need coloured posts or a trained detector.
 │   ├── Dockerfile.publisher    container 1 (Ubuntu 24.04 + ROS 2 Jazzy + minicar_publisher)
 │   ├── Dockerfile.processor    container 2 (+ minicar_processor + minicar_simulator)
 │   ├── processing.launch.py    starts processor + simulator in container 2
+│   ├── lidar.launch.py         starts lidar_mapper + simulator in container 2 (LiDAR version)
 │   └── entrypoint.sh
 ├── ros2_ws/src/
-│   ├── minicar_publisher/      top_view_publisher, video_publisher (container 1)
+│   ├── minicar_publisher/      top_view_publisher, video_publisher, lidar_replay (container 1)
 │   ├── minicar_processor/      core.py (detection, planning, checks), processor_node,
-│   │                           front_camera.py + video_checker_node (video version)
+│   │                           front_camera.py + video_checker_node (video version),
+│   │                           lidar_map.py + lidar_mapper_node (LiDAR version)
 │   └── minicar_simulator/      sim.py (car model, pure pursuit, noise), simulator_node
-├── data/                       the dataset (photos, video)
+├── data/                       the dataset (photos, video) + data/lidar_drive/ (iPhone LiDAR recording)
 ├── scripts/
 │   ├── step1_look.py … step4_pipeline.py   how the solution was built, step by step (no ROS)
 │   ├── dataset_stats.py        dataset statistics → docs/
