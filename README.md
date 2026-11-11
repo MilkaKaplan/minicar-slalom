@@ -1,5 +1,10 @@
 # Minicar Slalom — a ROS 2 Jazzy pipeline in Docker
 
+> **Two variants:** this branch (`main`) uses a **camera** (top-view photo + drive video).
+> A second variant with an **iPhone LiDAR** — the track is measured by the sensor itself, and a
+> simulated car with wind and variable speed drives on the LiDAR map — is in branch
+> [**`lidar-v2`**](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v2).
+
 A toy autonomous-driving pipeline: a small car has to drive a **slalom between 4 posts,
 turn around at the end and slalom back** inside a 1 m wide corridor.
 
