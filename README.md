@@ -1,4 +1,4 @@
-# Minicar Slalom — the explorer: an unknown track (ROS 2 Jazzy in Docker)
+# Minicar Slalom - the explorer: an unknown track (ROS 2 Jazzy in Docker)
 
 > **Branch `lidar-v3`.** A simulated car drives a slalom track it has **never seen before** and
 > finds its way by itself.
