@@ -148,29 +148,29 @@ are needed here only as the reference to compare with.)
 Code: `ros2_ws/src/minicar_simulator/minicar_simulator/explorer.py`, node `explorer_node`.
 Every **0.05 s** the car does what a self-driving car does — **look → understand → decide → drive**.
 
-**1. Look — its own virtual LiDAR.**
+**1. Look - its own virtual LiDAR.**
 * range **2 m**, field of view **60°** (like the iPhone LiDAR);
 * **occlusion**: in every direction (1° wide) it sees only the nearest surface — a post hides
   the posts behind it. From the start it sees **only the first post**;
 * everything it sees is remembered: its own map grows while it drives.
 
 **2. Understand — what is in its own map.**
-* **posts** = compact things 5–40 cm high, on the corridor's centre line (± 20 cm), standing
-  **in a line** (a line is tried through every two candidates — RANSAC idea);
+* **posts** = compact things 5-40 cm high, on the corridor's centre line (± 20 cm), standing
+  **in a line** (a line is tried through every two candidates - RANSAC idea);
 * seeing only the near side of a post, the centre is placed **one radius further away**;
 * **wall** = an obstacle at least **50 cm wide** across the corridor (posts are narrow);
   anything behind the wall is a piece of the wall, not a post.
 
 **3. Decide.**
 * **first post**: pass it on the side with **more free room** (fewer obstacles there);
-* **every new post** → **re-plan**: smooth S-curves through waypoints beside the posts seen so
+* **every new post** => **re-plan**: smooth S-curves through waypoints beside the posts seen so
   far (alternating sides), then straight on along the post line;
-* **wall seen and last post passed** → **final plan**: U-turn around the last post and slalom
+* **wall seen and last post passed** => **final plan**: U-turn around the last post and slalom
   back, every post on the other side.
 
 **4. Drive.** Kinematic bicycle model (wheelbase 5 cm, max steering 30°) and a *pure pursuit*
 controller aiming 6 cm ahead on the current plan. The car looks 20 times a second and steers
-100 times a second, using its **noisy** idea of where it is — see
+100 times a second, using its **noisy** idea of where it is: see
 [Driving conditions](#driving-conditions).
 
 **Safety margin.** A post seen from one side is known less precisely (up to ~9 cm). With a gap
@@ -240,13 +240,13 @@ when it saw something new and re-planned.*
 | Posts found | **5 of 5** | 5 |
 | Wall | 429.1 cm from the start | 427.5 cm |
 | First post passed on | left (chosen by free room) | left |
-| Re-plans | 7 | — |
+| Re-plans | 7 | - |
 | Path length | 901.1 cm | 854.7 cm |
-| Distance between the two paths | **2.4 cm** on average, 6.6 cm at most | — |
+| Distance between the two paths | **2.4 cm** on average, 6.6 cm at most | - |
 | Smallest gap to a post | **9.4 cm** (planned 13) | 10.0 cm |
-| Furthest from the centre line | 26.6 cm (corridor edge at 50 cm) | — |
+| Furthest from the centre line | 26.6 cm (corridor edge at 50 cm) | - |
 | Collisions | **none** | none |
-| Time | 50.4 s | — |
+| Time | 50.4 s | - |
 
 ### Ideal vs realistic vs wind
 
@@ -259,7 +259,7 @@ when it saw something new and re-planned.*
 | Realistic + wind 3 m/s + variable speed | 50.4 s | **15.6 / 20.7 cm/s** | 901 cm | 9.4 cm | none |
 
 * The noisy sensor makes the steering **jittery** (right panel) and in this drive brings the car
-  to **2.2 cm** from the last post — much closer than the ideal car.
+  to **2.2 cm** from the last post - much closer than the ideal car.
 * With wind, the car is **slower on the way there** (head wind) and **faster on the way back**
   (tail wind pushes it up to 27 cm/s); it slows down before every post.
 * One drive of each says little about luck — hence the stress test.
@@ -278,7 +278,7 @@ different random noise:
 | 2 cm / 4° | 5 in all drives | −1.3 cm | **2 / 5** |
 | 3 cm / 6° | 5 in all drives | −1.8 cm | **1 / 5** |
 
-→ On an unknown track with wind, the car needs to know its position to about **1 cm**; with
+=> On an unknown track with wind, the car needs to know its position to about **1 cm**; with
 2 cm or more it sometimes touches a post. The same limit as for the car that knew the track
 (branch `lidar-v2`).
 
@@ -288,7 +288,7 @@ is accurate to about 1 cm.**
 
 This is a **rule-based** robot (perception → planning → control), not machine learning:
 every decision can be explained. A reinforcement-learning car would instead learn by trial
-and error over thousands of drives with a reward (progress +, collision −).
+and error over thousands of drives with a reward (progress +, collision -).
 
 ---
 
@@ -303,7 +303,7 @@ and error over thousands of drives with a reward (progress +, collision −).
 * **Rules assumed**: the start points along the corridor and the posts stand on its centre line.
 * **One track**: 5 posts in a line; a curved or irregular track would need more general rules.
 * **Simple car and wind models**: no wheel slip; constant wind without gusts; drag and drift
-  coefficients chosen for a toy car — they show the direction of the effects, not exact numbers.
+  coefficients chosen for a toy car - they show the direction of the effects, not exact numbers.
 * **Few random drives**: 5 per noise level in the stress test; more drives would give more
   reliable collision rates.
 
