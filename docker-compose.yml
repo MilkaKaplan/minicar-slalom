@@ -1,6 +1,8 @@
-# Two-container ROS 2 Jazzy pipeline: slalom between posts.
-#   docker compose up --build --exit-code-from processor
-# The processor writes its results to ./results and exits; compose then stops the publisher.
+# Two-container ROS 2 Jazzy pipeline: slalom between posts, iPhone LiDAR version.
+#   docker compose --profile lidar up --build --exit-code-from lidar_processing lidar_replay lidar_processing
+# Container 1 replays the recording (depth + confidence + phone pose), container 2 builds
+# a 3D map, finds posts and wall WITHOUT track measurements, plans the slalom, compares it
+# with the real drive and simulates a car. Results go to results/lidar/.
 x-ros-env: &ros-env
   ROS_DOMAIN_ID: "43"
   RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
@@ -8,85 +10,18 @@ x-ros-env: &ros-env
   PYTHONUNBUFFERED: "1"
 
 services:
-  publisher:
+  lidar_replay:
     build:
       context: .
       dockerfile: docker/Dockerfile.publisher
-    image: minicar/publisher:jazzy
+    image: minicar/publisher:lidar
+    profiles: ["lidar"]
     environment: *ros-env
     volumes:
       - ./data:/data:ro
     networks: [ros]
     init: true            # helper process that forwards stop signals
     stop_signal: SIGINT   # send Ctrl+C, which ROS 2 handles cleanly
-
-  processor:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.processor
-    image: minicar/processor:jazzy
-    environment: *ros-env
-    volumes:
-      - ./results:/results
-    depends_on: [publisher]
-    networks: [ros]
-    init: true
-    stop_signal: SIGINT
-
-  # ---------------------------------------------------------------------------
-  # VIDEO VERSION (extra, not part of the main pipeline). Run it with:
-  #   docker compose --profile video up --build --exit-code-from video_checker video_publisher video_checker
-  # Container 1 streams the drive video as a front camera, container 2 finds the
-  # posts on every frame. Results go to results/video/.
-  video_publisher:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.publisher
-    image: minicar/publisher:jazzy
-    profiles: ["video"]
-    environment: *ros-env
-    volumes:
-      - ./data:/data:ro
-    networks: [ros]
-    init: true
-    stop_signal: SIGINT
-    command: ["/ros2_ws/install/minicar_publisher/lib/minicar_publisher/video_publisher_node", "--ros-args",
-              "-p", "video_path:=/data/drive_video.mp4", "-p", "every_nth:=3", "-p", "rate_hz:=20.0"]
-
-  video_checker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.processor
-    image: minicar/processor:jazzy
-    profiles: ["video"]
-    environment: *ros-env
-    volumes:
-      - ./results:/results
-    depends_on: [video_publisher]
-    networks: [ros]
-    init: true
-    stop_signal: SIGINT
-    command: ["/ros2_ws/install/minicar_processor/lib/minicar_processor/video_checker_node", "--ros-args",
-              "-p", "output_dir:=/results/video"]
-
-  # ---------------------------------------------------------------------------
-  # LIDAR VERSION (extra, branch lidar-v2). iPhone LiDAR recording of a slalom in a yard.
-  #   docker compose --profile lidar up --build --exit-code-from lidar_processing lidar_replay lidar_processing
-  # Container 1 replays the recording (depth + confidence + phone pose), container 2 builds
-  # a 3D map, finds posts and wall WITHOUT track measurements, plans the slalom, compares it
-  # with the real drive and simulates a car. Results go to results/lidar/.
-  lidar_replay:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.publisher
-    image: minicar/publisher:jazzy
-    profiles: ["lidar"]
-    environment: *ros-env
-    volumes:
-      - ./data:/data:ro
-    networks: [ros]
-    init: true
-    stop_signal: SIGINT
     command: ["/ros2_ws/install/minicar_publisher/lib/minicar_publisher/lidar_replay_node", "--ros-args",
               "-p", "recording_dir:=/data/lidar_drive", "-p", "every_nth:=2", "-p", "rate_hz:=30.0"]
 
@@ -94,7 +29,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.processor
-    image: minicar/processor:jazzy
+    image: minicar/processor:lidar
     profiles: ["lidar"]
     environment: *ros-env
     volumes:
@@ -106,18 +41,18 @@ services:
     stop_signal: SIGINT
     command: ["ros2", "launch", "/ros2_ws/lidar.launch.py"]
 
-  # Dataset statistics for the README (not part of the pipeline, run on demand):
+  # LiDAR dataset statistics for the README (not part of the pipeline, run on demand):
   #   docker compose run --rm stats
   stats:
-    image: minicar/processor:jazzy        # same image: has numpy, scipy, matplotlib, OpenCV
-    profiles: ["tools"]                   # not started by "docker compose up"
+    image: minicar/processor:lidar
+    profiles: ["tools"]
     environment:
       MPLCONFIGDIR: /tmp/matplotlib
     working_dir: /work
     volumes:
       - .:/work:ro
       - ./docs:/work/docs
-    command: ["python3", "/work/scripts/dataset_stats.py"]
+    command: ["python3", "/work/scripts/lidar_dataset_stats.py"]
 
 networks:
   ros:

@@ -16,8 +16,6 @@ setup(
     description="Reads the top-view photo of the slalom track and publishes it as sensor_msgs/Image.",
     license="MIT",
     entry_points={"console_scripts": [
-        "publisher_node = minicar_publisher.publisher_node:main",
-        "video_publisher_node = minicar_publisher.video_publisher_node:main",
         "lidar_replay_node = minicar_publisher.lidar_replay_node:main",
     ]},
 )

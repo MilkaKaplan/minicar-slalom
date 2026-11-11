@@ -3,7 +3,7 @@
 > **This is the LiDAR variant of the project.**
 > The camera variant (top-view photo + drive video) is in branch
 > [`main`](https://github.com/MilkaKaplan/minicar-slalom/tree/main).
-> The camera code is still in this branch (to compare), but this README is about the LiDAR.
+
 
 A small car has to drive a **slalom between posts, turn around at the end and slalom back**
 to the start, inside a 1 m wide corridor, without touching the posts.
@@ -384,22 +384,19 @@ ___
 
 ```
 .
-├── docker-compose.yml          profiles: (default) camera, "video", "lidar", "tools"
+├── docker-compose.yml          profiles: "lidar" (the pipeline), "tools" (statistics)
 ├── docker/
 │   ├── Dockerfile.publisher    container 1: Ubuntu 24.04 + ROS 2 Jazzy + minicar_publisher
 │   ├── Dockerfile.processor    container 2: + minicar_processor + minicar_simulator
-│   ├── lidar.launch.py         LiDAR version: lidar_mapper + car_simulator in container 2
-│   ├── processing.launch.py    camera version: processor + car_simulator
+│   ├── lidar.launch.py         lidar_mapper + car_simulator in container 2
 │   └── entrypoint.sh
 ├── ros2_ws/src/
-│   ├── minicar_publisher/      lidar_replay_node (+ camera: publisher_node, video_publisher_node)
-│   ├── minicar_processor/      lidar_map.py, lidar_mapper_node.py, core.py (planner, shared)
-│   │                           (+ camera: processor_node, front_camera, video_checker_node)
+│   ├── minicar_publisher/      lidar_replay_node (container 1)
+│   ├── minicar_processor/      lidar_map.py, lidar_mapper_node.py, core.py (slalom planner)
 │   └── minicar_simulator/      sim.py (car, pure pursuit, noise, wind, variable speed), simulator_node
 ├── data/lidar_drive/           the LiDAR recording + hand measurements + Polycam scan
-├── data/                       (camera dataset: photos, video)
-├── docs/                       figures, lidar_dataset_stats.json (+ camera statistics)
-├── scripts/                    helper scripts (camera steps 1–4, statistics, update_docs.sh)
+├── docs/                       figures, lidar_dataset_stats.json
+├── scripts/                    lidar_dataset_stats.py (statistics and figures for this README)
 └── results/                    pipeline output (not in git)
 ```
 

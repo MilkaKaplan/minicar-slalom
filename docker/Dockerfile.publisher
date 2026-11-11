@@ -1,4 +1,5 @@
-# Container 1: data acquisition (top-view photo -> sensor_msgs/Image)
+# Container 1: data acquisition - replays the iPhone LiDAR recording
+# (depth + confidence + phone pose) as live ROS 2 sensor topics.
 # ros:jazzy-ros-base = Ubuntu 24.04 (noble) + ROS 2 Jazzy + Python 3.12
 FROM ros:jazzy-ros-base
 
@@ -6,7 +7,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-numpy \
         python3-pil \
-        python3-opencv \
         ros-jazzy-rmw-cyclonedds-cpp \
     && rm -rf /var/lib/apt/lists/*
 
@@ -18,5 +18,5 @@ COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
 # Run the node directly (not via "ros2 run"), so it receives the stop signal from Docker
-CMD ["/ros2_ws/install/minicar_publisher/lib/minicar_publisher/publisher_node", "--ros-args", \
-     "-p", "image_path:=/data/top_view.jpeg", "-p", "rate_hz:=1.0"]
+CMD ["/ros2_ws/install/minicar_publisher/lib/minicar_publisher/lidar_replay_node", "--ros-args", \
+     "-p", "recording_dir:=/data/lidar_drive"]

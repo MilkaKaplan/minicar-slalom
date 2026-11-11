@@ -16,8 +16,6 @@ setup(
     description="Finds the posts on the photo, plans the slalom path (there, U-turn, back) and checks it.",
     license="MIT",
     entry_points={"console_scripts": [
-        "processor_node = minicar_processor.processor_node:main",
-        "video_checker_node = minicar_processor.video_checker_node:main",
         "lidar_mapper_node = minicar_processor.lidar_mapper_node:main",
     ]},
 )
