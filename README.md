@@ -1,24 +1,26 @@
-# Minicar Slalom — a ROS 2 Jazzy pipeline in Docker
+# Minicar Slalom — LiDAR version (ROS 2 Jazzy in Docker)
 
-> **Two versions of this project**
-> * branch [`main`](https://github.com/MilkaKaplan/minicar-slalom/tree/main) — **camera**: the track is
->   found on a top-view photo (needs the known post spacing for the scale);
-> * branch [`lidar-v2`](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v2) (this one) — everything
->   from `main` **plus an iPhone LiDAR version**: the track is measured by the sensor itself, no
->   measurements needed, and the simulated car drives on the LiDAR map
->   ([jump to it](#extra-iphone-lidar--a-track-nobody-measured-for-us)).
+> **This is the LiDAR variant of the project.**
+> The camera variant (top-view photo + drive video) is in branch
+> [`main`](https://github.com/MilkaKaplan/minicar-slalom/tree/main).
+> The camera code is still in this branch (to compare), but this README is about the LiDAR.
 
-A toy autonomous-driving pipeline: a small car has to drive a **slalom between 4 posts,
-turn around at the end and slalom back** inside a 1 m wide corridor.
+A small car has to drive a **slalom between posts, turn around at the end and slalom back**
+to the start, inside a 1 m wide corridor, without touching the posts.
 
-The pipeline takes a **photo of the track taken from above** (our own dataset), finds the
-posts, plans a safe path, checks it, and lets a **simulated car** drive it. As an extra, the
-**drive video** filmed from the floor is streamed through the same pipeline like a car's
-front camera.
+In the camera variant the track had to be **known in advance** (posts 50 cm apart) to turn
+pixels into centimetres. On a real competition track nobody tells you that. Here an
+**iPhone LiDAR** recording is used, and the system **measures the track itself**: it builds a
+3D map of the yard, finds the posts and the wall, plans the slalom, compares it with the
+real drive, and lets a simulated car drive it — with wind and variable speed.
 
-| Planned path on the photo and on the map | Simulated car driving it |
-|---|---|
-| ![plan](docs/images/slalom_plan.png) | ![drive](docs/images/sim_realistic.gif) |
+Known in advance are only **our car** (5 cm wide, wanted gap 10 cm) and the **rules**
+(corridor 1 m wide).
+
+<img src="docs/images/lidar/lidar_drive.gif" width="360">
+
+*The simulated car (orange) driving the planned slalom on the LiDAR map of the yard, with a
+3 m/s wind and variable speed. Blue: the path the phone really took.*
 
 ---
 
@@ -29,8 +31,7 @@ front camera.
 - [Pipeline](#pipeline)
 - [How it works](#how-it-works)
 - [Results](#results)
-- [Extra: the drive video as a front camera](#extra-the-drive-video-as-a-front-camera)
-- [Extra: iPhone LiDAR — a track nobody measured for us](#extra-iphone-lidar--a-track-nobody-measured-for-us)
+- [Camera vs LiDAR](#camera-vs-lidar)
 - [Limitations](#limitations)
 - [Repository layout](#repository-layout)
 
@@ -38,49 +39,42 @@ front camera.
 
 ## Quick start
 
-Requirements: **Docker** with **Compose v2** (Docker Desktop on Mac/Windows). Nothing else.
+Requirements: **Docker** with **Compose v2** (Docker Desktop on Mac/Windows).
 
 ```bash
-git clone https://github.com/MilkaKaplan/minicar-slalom.git
+git clone -b lidar-v2 https://github.com/MilkaKaplan/minicar-slalom.git
 cd minicar-slalom
-docker compose up --build --exit-code-from processor
+docker compose --profile lidar up --build --exit-code-from lidar_processing lidar_replay lidar_processing
 ```
 
-The first build downloads ROS 2 Jazzy (~1 GB, a few minutes). The run itself takes ~20 s.
-Both containers stop by themselves and the command returns exit code 0.
-
-Results appear in `results/`:
+The first build downloads ROS 2 Jazzy (~1 GB). The run takes about 2 minutes (most of it is
+drawing the animation). Both containers stop by themselves with exit code 0.
+Results appear in `results/lidar/`:
 
 | File | Content |
 |---|---|
-| `slalom_plan.png` | detected posts + planned path, on the photo and as a map |
-| `result.json` | post positions, gaps, turn radii, path length |
-| `path.csv` | the path as points `(part, x_cm, y_cm)` — what a real car would follow |
-| `sim_ideal.png/.gif`, `sim_realistic.png/.gif` | the simulated car driving the path |
+| `lidar_map.png` | the LiDAR map with the posts and wall found, the plan and the real drive |
+| `lidar_drive.gif` | the simulated car driving on the LiDAR map |
+| `lidar_result.json` | posts, distances, plan checks, real drive vs plan, LiDAR vs hand measurements |
+| `path.csv` | the planned path as points `(part, x_cm, y_cm)` |
+| `sim_ideal`, `sim_realistic`, `sim_windy` `.png/.gif` | simulated drives |
 | `sim_robustness.png`, `sim_result.json` | 40 drives with more and more sensor noise |
 
-Other commands:
+Experiments without changing code:
 
 ```bash
-# Extra: the drive video as a front-camera stream (results in results/video/)
-docker compose --profile video up --build --exit-code-from video_checker video_publisher video_checker
+# no wind / stronger wind (6 m/s: the car cannot drive against it)
+docker compose run --rm lidar_processing ros2 launch /ros2_ws/lidar.launch.py wind_cm_s:=0.0
+docker compose run --rm lidar_processing ros2 launch /ros2_ws/lidar.launch.py wind_cm_s:=600.0
+# a car that cannot steer as much
+docker compose run --rm lidar_processing ros2 launch /ros2_ws/lidar.launch.py max_steer_deg:=10.0
 
-# Extra: iPhone LiDAR recording, map built without track measurements (results in results/lidar/)
-docker compose --profile lidar up --build --exit-code-from lidar_processing lidar_replay lidar_processing
-
-# Dataset statistics and figures (writes docs/)
-docker compose run --rm stats
-
-# Experiments without changing code, e.g. a car that cannot steer as much, or a smaller gap
-docker compose run --rm processor ros2 launch /ros2_ws/processing.launch.py max_steer_deg:=10.0
-docker compose run --rm processor ros2 launch /ros2_ws/processing.launch.py gap_cm:=5.0
-
-# Stop everything (all versions)
+# stop and clean up everything
 docker compose --profile lidar --profile video down --remove-orphans
 ```
 
-If Docker says `network ... not found`, an old stopped container still points to a network
-that was removed. Clean up with the "stop everything" command above and run again.
+If Docker says `network ... not found`, an old stopped container still points to a removed
+network: run the clean-up command above and start again.
 
 ---
 
@@ -88,86 +82,59 @@ that was removed. Clean up with the "stop everything" command above and run agai
 
 ```
                  wall
-  ─────────────────────────────────  x = 300 cm
-            ╭──●──╮                  U-turn around post 4
+  ───────────────────────────────
+            ╭──●──╮                U-turn around the last post
             ╰╮   ╭╯
-             ╳                       ● post (Ø ≈ 13 cm)
-            ╭╯   ╰╮                  ╳ the path crosses the post line
-            ╰──●──╯                    between the posts
-              ...                    corridor: 1 m wide (50 cm each side)
-            ╭──●──╮  x = 100 cm      posts 50 cm apart
-             ╲   ╱
-              ▲      x = 0           start, 1 m before post 1
+             ╳                     ● paper post
+            ╭╯   ╰╮                ╳ the path crosses the post line between posts
+            ╰──●──╯
+              ...                  corridor 1 m wide
+            ╭──●──╮                first post: passed on one side on the way there,
+             ╲   ╱                             on the other side on the way back
+              ▲  start
 ```
 
-* 4 posts in a line, **50 cm** apart, in a corridor **1 m** wide.
-* The car (5 cm wide) starts **1 m** before post 1, drives a slalom to the wall
-  (50 cm after post 4), **turns around post 4** and slaloms back, passing every post on
-  the **other** side (a figure of eight).
-* Wanted gap between a post and the side of the car: **5–10 cm** (we use 10 cm).
-
-The idea of the path comes from a hand drawing on the top-view photo
-(black = there, purple = back):
-
-<img src="data/trace.jpeg" width="260">
+1. **There**: slalom — post 1 on one side, post 2 on the other, …
+2. **U-turn** around the last post, without touching the wall behind it.
+3. **Back**: slalom to the start, passing every post on the **other** side (a figure of eight).
+4. Never touch the posts, the corridor edges or the wall.
 
 ---
 
 ## Dataset
 
-Own dataset, filmed in an office with paper rolls as posts.
-Statistics are computed by `scripts/dataset_stats.py`, all numbers are in
-[`docs/dataset_stats.json`](docs/dataset_stats.json).
+A slalom in a paved yard: **5 paper posts** (Ø ≈ 7 cm), recorded with the iPhone LiDAR
+using the [Stray Scanner](https://apps.apple.com/app/stray-scanner/id1557051662) app while
+driving the phone ≈ 5–10 cm above the ground along the slalom: there, U-turn, back.
+Folder `data/lidar_drive/`, statistics in [`docs/lidar_dataset_stats.json`](docs/lidar_dataset_stats.json).
 
-![dataset](docs/images/dataset_overview.png)
+| File | What it is |
+|---|---|
+| `depth/000000.png …` | **1661 depth frames**, 256 × 192 pixels, distance in mm (16-bit PNG) |
+| `confidence/…` | for every depth pixel: 0 = low, 1 = medium, 2 = high confidence |
+| `odometry.csv` | **phone pose** for every frame from ARKit: position (m) + orientation (quaternion) |
+| `camera_matrix.csv` | camera focal length and centre (for the 1920 × 1440 video) |
+| `imu.csv` | accelerometer + gyroscope, 100 Hz (recorded, not used) |
+| `measurements.json` | hand measurements — used **only to check** the result |
+| `polycam_top_view.webp` | the same track scanned with Polycam (illustration) |
 
-| File | What it is | Size |
-|---|---|---|
-| `data/top_view.jpeg` | **input of the pipeline**: top view, phone held ≈2 m above the track | 899 × 1599 px |
-| `data/trace.jpeg` | the same photo with the path drawn by hand | 899 × 1599 px |
-| `data/front_start.jpeg` | the car's view at the start | 899 × 1599 px |
-| `data/side_view_4_posts.jpeg` | side view of the 4 posts | 899 × 1599 px |
-| `data/side_view_4_pos_middle.jpeg` | first test photo | 1600 × 1204 px |
-| `data/drive_video.mp4` | the drive filmed from the floor: there, U-turn, back | 480 × 860 px, 30 fps, 45 s, 1350 frames |
+![depth](docs/images/lidar/depth_frames.png)
 
-All files were sent through WhatsApp, so they are **compressed** (small resolution).
+| Property | Value |
+|---|---|
+| Duration / frames | 48.5 s, 1661 frames (34 per second) |
+| Depth confidence | low 40 %, medium 43 %, **high 17 %** of the pixels |
+| Distance of high-confidence points | median 1.9 m (the pipeline only uses points closer than 2 m) |
+| Phone path | **10.6 m**; ends **9.7 cm** from where it started |
+| Phone height above the ground | ≈ 5 cm, varied by 12 cm during the drive |
+| Phone speed | 22 cm/s on average |
 
-### Track dimensions
+**Hand measurements** (tape measure, approximate): 5 posts, ≈ 53 cm apart, corridor 1 m,
+start mark 93 cm before post 1, last post → wall 62 cm, post diameter ≈ 7 cm.
 
-**Exact, from the floor tiles (50 × 50 cm)**: the posts stand on tile corners, so the
-post spacing (50 cm), the corridor (1 m), the start (1 m before post 1) and the wall
-(50 cm after post 4) are whole tiles.
+<img src="docs/images/lidar/polycam_top_view.jpg" width="280">
 
-**Approximate**: post diameter ≈ 13 cm, post height ≈ 1 m, camera height for the top
-view ≈ 2 m. The pipeline does not use the camera height: it takes the scale from the
-photo itself.
-
-### Hand labels
-
-Two things were labelled by hand:
-
-* **Post bases on the top view** (pixels): (300, 160), (310, 520), (300, 890), (300, 1250).
-  Check against the tile grid: the labelled spacings are **49.5 / 50.9 / 49.5 cm**
-  (tile = 50 cm), so the labels are accurate to **< 1 cm**. Scale: **7.27 px per cm**.
-* **Phases of the drive video** (by watching it, ±1–2 s): there 0–14 s, U-turn 14–22 s,
-  back 22–40 s, end 40–45 s.
-
-### Video statistics
-
-![frames](docs/images/video_frames.png)
-![video stats](docs/images/video_stats.png)
-
-| Phase | Time | Frames | Mean brightness | Sharpness (median) | Blurred / featureless frames |
-|---|---|---|---|---|---|
-| there | 0–14 s | 420 | 139 | 25 | 84 |
-| U-turn | 14–22 s | 240 | 141 | 17 | 76 |
-| back | 22–40 s | 540 | 119 | 118 | 17 |
-| end | 40–45 s | 150 | 131 | 40 | 0 |
-
-* **177 of 1350 frames (13 %)** are blurred or almost featureless (sharpness < 10),
-  most of them during the U-turn when the camera turns fast.
-* The way back is darker (windows in the background) and has **5× more detail**
-  (chairs, tables) — more things that look like posts.
+*The track scanned with Polycam (for illustration only, not used by the pipeline).*
 
 ---
 
@@ -176,297 +143,114 @@ Two things were labelled by hand:
 Two containers (Ubuntu 24.04, ROS 2 Jazzy, Python 3.12), three ROS 2 nodes:
 
 ```
- ┌──── container 1: publisher ────┐            ┌──────────── container 2: processor ─────────────┐
- │                                │            │                                                  │
- │ data/top_view.jpeg             │ /camera/   │  slalom_processor                                │
- │   └► top_view_publisher ───────┼─top_view──►│   find posts → cm → plan path → checks           │
- │      (1 image per second)      │ (Image)    │   ├─► results/slalom_plan.png, result.json, ...  │
- │                                │            │   ├─► /slalom/path   (nav_msgs/Path)  ─┐         │
- └────────────────────────────────┘            │   └─► /slalom/posts  (PoseArray)      ─┤         │
-                                               │                                        ▼         │
-                                               │  car_simulator                                   │
-                                               │   drives the path: ideal, realistic, stress test │
-                                               │   ├─► results/sim_*.png/.gif, sim_result.json    │
-                                               │   └─► /sim/driven_path (nav_msgs/Path)           │
-                                               └──────────────────────────────────────────────────┘
+ ┌── container 1 ───────────────────┐                     ┌── container 2 ──────────────────────────────┐
+ │ lidar_replay                     │ /phone/depth        │ lidar_mapper                                │
+ │  plays data/lidar_drive/ like    │ /phone/confidence ─►│  frames → 3D map → ground → posts → wall    │
+ │  live sensors (every 2nd frame)  │ /phone/pose         │  → plan slalom → compare with real drive    │
+ │                                  │ /phone/camera_info  │  ─► /slalom/path, /slalom/posts,            │
+ └──────────────────────────────────┘                     │     /slalom/limits ──────────────┐          │
+                                                          │                                  ▼          │
+                                                          │ car_simulator                               │
+                                                          │  ideal, realistic, windy drives, stress test│
+                                                          │  ─► /sim/driven_path ──► lidar_mapper draws │
+                                                          │                          the car on the map │
+                                                          └─────────────────────────────────────────────┘
 ```
 
 | Topic | Message | From → to |
 |---|---|---|
-| `/camera/top_view` | `sensor_msgs/Image` (rgb8, 899 × 1599) | publisher → processor |
-| `/slalom/path` | `nav_msgs/Path` (metres, frame `track`) | processor → simulator |
-| `/slalom/posts` | `geometry_msgs/PoseArray` | processor → simulator |
-| `/sim/driven_path` | `nav_msgs/Path` | simulator → (RViz, anyone) |
+| `/phone/depth` | `sensor_msgs/Image` 16UC1 (mm), 256 × 192 | replay → mapper |
+| `/phone/confidence` | `sensor_msgs/Image` mono8 | replay → mapper |
+| `/phone/pose` | `geometry_msgs/PoseStamped` (ARKit world) | replay → mapper |
+| `/phone/camera_info` | `sensor_msgs/CameraInfo` (latched) | replay → mapper |
+| `/slalom/path` | `nav_msgs/Path` (metres, frame `track`) | mapper → simulator |
+| `/slalom/posts` | `geometry_msgs/PoseArray` | mapper → simulator |
+| `/slalom/limits` | `std_msgs/Float32MultiArray` (post radius, corridor, wall) | mapper → simulator |
+| `/sim/driven_path` | `nav_msgs/Path` | simulator → mapper |
 
-* The processor does **not** read files from `data/`: it only gets the image through ROS 2.
-  It would work the same with a live camera instead of the publisher.
-* Topics are RELIABLE + TRANSIENT_LOCAL, so a node that starts later still gets the last
-  message. DDS: Cyclone DDS over a Docker bridge network.
-* Container 2 runs the processor and the simulator together with `docker/processing.launch.py`.
+Depth, confidence and pose of one frame carry the same timestamp; the mapper pairs them.
+The **car simulator is the same node as in the camera variant** — it does not care whether
+the path came from a photo or from a LiDAR map. That is what the ROS 2 topics are for.
 
 ---
 
 ## How it works
 
-### 1. Finding the posts on the top view (`core.detect_posts`)
+Code: `ros2_ws/src/minicar_processor/minicar_processor/lidar_map.py`.
 
-![detection](docs/images/detection_steps.png)
+**1. A 3D map from the frames.** Every high-confidence depth pixel closer than 2 m becomes a
+3D point in the camera, then — with the phone pose — a point in the world. All frames
+together: ≈ 250 000 points (one per 1 cm cube).
+*(First the camera axes were flipped the ARKit way and the map came out smeared into fans.
+Testing both conventions, the one with the flattest floor was right: 9 % of the points in
+the floor's height bin instead of 3 %.)*
 
-1. **Contrast**: for every pixel, how much brighter it is than the floor around it
-   (median over a ~400 px window). Light is uneven across the photo, so one global
-   threshold does not work.
-2. **Mask**: contrast > 10 and not coloured (removes the wooden table).
-3. **Blobs**: clean the mask (removes marble veins and tile seams), split into connected
-   pieces; keep large ones that do not touch the left/right edge (walls, furniture).
-4. **Bases**: seen from above, a standing post seems to "fall" away from the point under
-   the camera (perspective). So all post axes meet at that point (yellow star). The base
-   is the end of the post closer to that point, moved in by one post radius.
+**2. Ground.** The most common height is the floor; a plane fitted through it is
+**2 cm thick**, so the map is consistent.
 
-### 2. Pixels → centimetres
+**3. Posts.** Compact things 5–40 cm above the ground, within 0.5 m of the drive, in 2 cm
+cells. Then two common-sense rules that need no track knowledge:
+* pieces closer than 20 cm are one object (merged);
+* slalom posts **stand in a line**: a line is tried through every pair of candidates
+  (RANSAC idea) and only candidates within 10 cm of the best line are kept.
 
-The scale comes from the photo: detected posts are 50 cm apart → **7.30 px/cm**.
-A line is fitted through the posts; `x` = forward from the start, `y` = sideways
-(+ = car's left).
+7 candidates → **5 posts** (things near the start were rejected).
 
-### 3. Path planning (`core.plan_path`)
+**4. Wall.** Walking forward behind the last post in 2 cm steps, the wall is the first slice
+where obstacles cover **at least 50 cm across** the corridor (a stone or a leaf does not).
 
-* For every post a **waypoint** at `A = post radius + gap + half car width = 6.5 + 10 + 2.5 = 19 cm`
-  beside it, alternating sides.
-* Waypoints are joined by smooth **half-cosine S-curves** (the car drives straight at each
-  waypoint, no kinks). The entry from the start is one gentle sideways move over 1 m.
-* **U-turn**: half circle of radius A around the last post.
-* **Back**: mirror image of the way there, every post on the other side.
+**5. Track frame.** `x` = forward from the start along the post line, `y` = sideways
+(+ = left). The side of the first post is taken from the real drive.
 
-### 4. Checks (`core.check_path`)
+**6. Plan and checks** — the same planner as the camera variant: waypoints
+`A = 3.5 + 10 + 2.5 = 16 cm` beside every post, smooth S-curves, U-turn around the last
+post, back on the other side; gaps to posts, corridor and wall along the whole path.
 
-Gap to every post **along the whole path** (not only next to the posts — the path
-cuts corners between them), gap to the corridor edge and the wall, and the tightest
-turn radius `R = 1 / curvature`.
+**7. Car simulator** (`minicar_simulator/sim.py`): kinematic bicycle (wheelbase 5 cm,
+max steering 30° → smallest turn radius 8.7 cm), *pure pursuit* controller. Drives:
 
-### 5. Car simulator (`minicar_simulator/sim.py`)
-
-* **Car model**: kinematic bicycle, wheelbase 5 cm, max steering 30° →
-  smallest turn radius `R_min = 5 / tan 30° = 8.7 cm`, speed 20 cm/s.
-* **Controller**: *pure pursuit* — the car aims at a point of the path 6 cm ahead.
-* **Ideal** run: perfect sensors, wheels turn instantly.
-* **Realistic** run: position sensor noise 1 cm, heading noise 2°, steering motor 120°/s.
-* **Stress test**: 10 drives each with noise 0.5 / 1 / 2 / 3 cm (fixed random seeds, so
-  the results are reproducible).
-
-The car never sits on the path: its position changes only through speed and steering,
-so it can fail (see the steering table below).
+* **ideal** — perfect sensors, constant 20 cm/s;
+* **realistic** — position sensor noise 1 cm, heading 2°, steering motor 120°/s;
+* **windy** — realistic + **wind 3 m/s** along the corridor (in the face on the way there,
+  in the back on the way back, pushing sideways when the car drives at an angle) +
+  **variable speed**: the car slows down before tight turns (v ≤ √(10 cm/s² · R)),
+  speeds up on straighter parts, with limited acceleration and braking;
+* **stress test** — 10 drives for each sensor noise 0.5 / 1 / 2 / 3 cm.
 
 ---
 
 ## Results
 
-### Detection and path
-
-| | Value |
-|---|---|
-| Posts found | **4 of 4** |
-| Detection error vs. hand labels | 4.9 / 2.2 / 1.2 / 2.1 cm (mean **2.6 cm**) |
-| Post positions (x, y) | (100.0, 0.3), (154.1, −0.4), (202.4, −0.2), (250.0, 0.3) cm |
-| Smallest gap car ↔ post | **8.9 cm** (planned 10 cm; the path cuts corners) |
-| Gap to corridor edge / wall | 28.1 cm / 28.5 cm |
-| Tightest turn | there 12.0 cm, U-turn 19.0 cm, back 11.9 cm |
-| Path length | 652 cm |
-
-Post 1 has the largest error: its lower half is in shadow and almost as dark as the floor.
-
-### Choosing the detection threshold
-
-![contrast](docs/images/top_view_contrast.png)
-
-| Contrast threshold | Result |
-|---|---|
-| 5 | too loose: 19 blobs, post 4 merges with the wall → **3 of 4 posts** |
-| **10** | **4 of 4 posts, mean error 2.6 cm** |
-| 30 | too strict: only pieces of the shaded posts 1–2 → 4 of 4 but errors up to **20 cm** |
-
-Only 3.5 % of the floor pixels are brighter than threshold 10.
-
-### How sharp is the slalom?
-
-For a sine-like slalom the tightest turn is
-
-**R ≈ (d / π)² / A**
-
-(d = post spacing, A = sideways swing). With d = 50 cm and A = 19 cm: R ≈ 13 cm; the
-detected spacings 54 / 48 / 48 cm give the 12 cm above. Doubling the spacing to 1 m
-would make the turns **4× gentler** (R ≈ 53 cm). A smaller gap to the posts also makes
-the turns gentler, but leaves less safety margin — a trade-off.
-
-### Simulated drives
-
-| Ideal car | Realistic car (noise + slow steering) |
-|---|---|
-| ![ideal](docs/images/sim_ideal.png) | ![realistic](docs/images/sim_realistic.png) |
-
-| | Ideal | Realistic |
-|---|---|---|
-| Distance from the planned path: mean / max | 0.08 / 0.20 cm | 0.27 / 0.81 cm |
-| Smallest gap to a post | 8.8 cm | 8.4 cm |
-| Steering used (max 30°) | 20.5° | 30.0° |
-| Collision | no | no |
-| Drive time | 32.5 s | 32.7 s |
-
-**Which car can drive this track?** (`scripts/steering_sweep.py`, ideal car)
-
-| Max steering | R_min | Error mean / max | Smallest gap | |
-|---|---|---|---|---|
-| 30° | 8.7 cm | 0.08 / 0.20 cm | 8.8 cm | OK |
-| 20° | 13.7 cm | 0.08 / 0.20 cm | 8.8 cm | OK |
-| 15° | 18.7 cm | 0.33 / 2.33 cm | 8.8 cm | OK |
-| 12° | 23.5 cm | 1.82 / 9.34 cm | 8.8 cm | OK |
-| 11° | 25.7 cm | 4.37 / 17.0 cm | 7.3 cm | OK |
-| 10° | 28.4 cm | 13.6 / 38.9 cm | −5.6 cm | **collision** |
-
-→ The car must be able to turn with a radius of about **25 cm or less**.
-
-### Robustness: how good must the car's position sensor be?
-
-![robustness](docs/images/sim_robustness.png)
-
-| Sensor noise (position / heading) | Worst distance from path | Worst gap to a post | Collisions |
-|---|---|---|---|
-| 0.5 cm / 1° | 0.4 cm | 8.7 cm | 0 / 10 |
-| 1 cm / 2° | 1.2 cm | 8.4 cm | 0 / 10 |
-| 2 cm / 4° | 18.2 cm | 3.1 cm | 0 / 10 |
-| 3 cm / 6° | 22.4 cm | 1.5 cm | 0 / 10 |
-
-→ Up to **1 cm** of sensor error the car keeps > 8 cm from the posts. From **2 cm** it
-drifts up to 18–22 cm off the path and almost touches the posts. A slow steering motor
-alone does no harm — the problem is noise *and* slow steering together.
-
----
-
-## Extra: the drive video as a front camera
-
-A separate, optional version of the pipeline (Compose profile `video`):
-
-```
-container 1: video_publisher ── /camera/front (Image, 10 frames per video second) ──► container 2: video_checker
-```
-
-* `video_publisher` plays `drive_video.mp4` like the car's front camera (450 frames);
-  the header stamp of each frame is its time in the video.
-* `video_checker` looks for posts on every frame: on the video the posts are **cool**
-  (bluish) white, the wall and floor **warm** white. It marks the nearest post and saves
-  `results/video/video_check.png`, `video_detections.gif` and `video_check.json`.
-
-![video check](docs/images/video_check.png)
-![video strip](docs/images/video_detections_strip.png)
-
-| Phase | Frames with a post found |
-|---|---|
-| there (white wall behind) | **83 %** |
-| U-turn (few posts in view) | 22 % |
-| back (windows, chairs) | **22 %** |
-| end | 67 % |
-
-**Honest result:** on the way there the camera clearly sees the slalom — the nearest
-post slides to the left edge, then the next one to the right, and so on. On the way back
-the light from the windows changes the colours and white chair legs look like posts,
-so the detector misses most posts. The left/right sequence is therefore **not reliable
-enough** to confirm the planned slalom from the video.
-
-The video does **not** steer the car — the path comes from the top view. In a real car
-a live front camera could correct the car's position using the posts as landmarks
-(*localization*), which is exactly what the robustness test asks for (≈ 1 cm accuracy).
-That would need coloured posts or a trained detector.
-
----
-
-## Extra: iPhone LiDAR — a track nobody measured for us
-
-The main pipeline needs to know the track (posts 50 cm apart) to get its scale. On a
-competition track nobody tells you that. In this version the system **measures everything
-itself** from the iPhone's LiDAR; known in advance are only **our car** (5 cm wide, wanted
-gap 10 cm) and the **rules** (corridor 1 m wide).
-
-**Data** (`data/lidar_drive/`): a new slalom in a paved yard — 5 paper posts (Ø ≈ 7 cm),
-recorded with the [Stray Scanner](https://apps.apple.com/app/stray-scanner/id1557051662)
-app while driving the phone ≈ 5–10 cm above the ground: there, U-turn, back.
-48 s, 1661 frames of **depth** (256 × 192, mm), **confidence** (low/medium/high) and the
-**phone pose** from ARKit (position + orientation). Hand measurements are in
-`measurements.json` and are used **only to check** the result.
-
-<img src="docs/images/lidar/polycam_top_view.jpg" width="300"> <br>
-*The same track scanned with Polycam (for illustration only).*
-
-```
- ┌── container 1 ─────────────────┐            ┌── container 2 ─────────────────────────────────┐
- │ lidar_replay                   │ /phone/depth       │ lidar_mapper                            │
- │  data/lidar_drive/ ────────────┼ /phone/confidence ►│  frames → 3D map → ground → posts → wall │
- │  (plays the recording like     │ /phone/pose        │  → plan slalom → compare with real drive │
- │   live sensors)                │ /phone/camera_info │  ─► /slalom/path, /posts, /limits ─┐     │
- └────────────────────────────────┘                    │ car_simulator ◄──────────────────────┘   │
-                                                       │   └─► /sim/driven_path ─► lidar_mapper   │
-                                                       │       (draws the car on the LiDAR map)   │
-                                                       └──────────────────────────────────────────┘
-```
-
-```bash
-docker compose --profile lidar up --build --exit-code-from lidar_processing lidar_replay lidar_processing
-# results in results/lidar/
-# without wind / stronger wind:
-docker compose run --rm lidar_processing ros2 launch /ros2_ws/lidar.launch.py wind_cm_s:=0.0
-docker compose run --rm lidar_processing ros2 launch /ros2_ws/lidar.launch.py wind_cm_s:=600.0
-```
-
-**How the map is built** (`minicar_processor/lidar_map.py`):
-
-1. every depth pixel → 3D point in the camera (focal length from `camera_info`) → 3D point
-   in the world (phone pose). Only high-confidence points closer than 2 m.
-2. **ground** = the most common height + a fitted plane (thickness 2 cm);
-3. **posts** = compact things 5–40 cm above the ground near the drive; pieces of one object
-   are merged, and only candidates **standing in one line** are kept (7 candidates → 5 posts);
-4. **wall** = the first obstacle behind the last post that is at least 50 cm wide;
-5. the slalom is planned with the same planner as the main pipeline, the car simulator drives it.
-
 ![lidar map](docs/images/lidar/lidar_map.png)
+
+### The track measured by the LiDAR
 
 | | LiDAR (automatic) | Hand measurement |
 |---|---|---|
-| Posts | **5** | 5 |
-| Post spacing | 66 / 64 / 60 / 54 cm, mean **61 cm** | ≈ 53 cm |
+| Posts | **5 of 5** | 5 |
 | Last post → wall | **64 cm** | 62 cm |
+| Post spacing | 66 / 64 / 60 / 54 cm, mean **61 cm** | ≈ 53 cm |
 | Start of recording → post 1 | 119 cm | 93 cm (the recording started before the start mark) |
 | Ground flatness | 2 cm | — |
 
-| Result | Value |
+### Plan vs the real drive
+
+| | Value |
 |---|---|
-| Planned path: smallest gap to a post | 10.0 cm, corridor edge 23.8 cm, wall 45.5 cm |
+| Planned path: smallest gap to a post | **10.0 cm** (as wanted) |
+| Planned path: gap to corridor edge / wall | 23.8 cm / 45.5 cm |
 | Tightest turn | 16–19 cm |
-| **Real drive vs plan** (the phone's path) | **6.7 cm** apart on average, 21 cm at most |
-| Simulated realistic car | max 1.0 cm from the path, ≥ 9.1 cm from every post, no collision |
+| Path length | 855 cm |
+| **Real drive (phone) vs plan** | **6.7 cm** apart on average, 21 cm at most |
+| Real drive: smallest gap to post 4 | −1.6 cm (closer than a 5 cm car may go) |
 
-**The simulated car (with wind and variable speed, see below) driving the planned slalom on
-the LiDAR map** (orange), next to the path the phone really took (blue). The mapper sends the plan to the car simulator, gets the
-simulated drive back over `/sim/driven_path` and draws it on the map (`results/lidar/lidar_drive.gif`):
+The human "driver" stayed close to the plan but was less careful than the planner.
 
-<img src="docs/images/lidar/lidar_drive.gif" width="360">
-
-![lidar sim](docs/images/lidar/sim_realistic.png)
-
-### Wind and variable speed
-
-The simulator can add the outside world (`wind_cm_s`, on by default in the LiDAR version):
-
-* **wind 3 m/s along the corridor**, from the wall to the start: **in the face** on the way
-  there, **in the back** on the way back. It slows down or pushes the car (air drag), and
-  when the car drives at an angle in the slalom or across in the U-turn, the side wind
-  **pushes it sideways**;
-* **variable speed**: like a driver, the car slows down before tight turns
-  (speed in a turn of radius R ≤ √(10 cm/s² · R)), speeds up on straighter parts, with
-  limited acceleration and braking. It starts from standstill.
-
-The animation above shows this windy drive.
+### Simulated drives
 
 ![windy](docs/images/lidar/sim_windy.png)
 
-| Drive on the LiDAR track | Time | Mean speed there / back | Max distance from path | Smallest gap to a post |
+| Drive | Time | Mean speed there / back | Max distance from path | Smallest gap to a post |
 |---|---|---|---|---|
 | Ideal, constant 20 cm/s | 42.7 s | 20 / 20 cm/s | 0.14 cm | 9.9 cm |
 | Realistic (sensor noise, slow steering) | 42.7 s | 20 / 20 cm/s | 0.96 cm | 9.1 cm |
@@ -474,35 +258,51 @@ The animation above shows this windy drive.
 
 * The head wind almost **halves** the speed on the way there; the tail wind pushes the car
   back faster than it wants to go (up to 27 cm/s).
+* The car slows down before every post (speed panel above).
 * The largest deviation is in the **U-turn**, where the car drives across the wind.
-* At **6 m/s** the air drag is stronger than the motor and the car cannot drive against the
-  wind at all (`ros2 launch /ros2_ws/lidar.launch.py wind_cm_s:=600.0`).
+* At **6 m/s** the air drag is stronger than the motor: the car cannot drive against the wind.
 
-**Honest notes**
+### Robustness: how good must the car's position sensor be?
 
-* The wall distance matches the tape measure (64 vs 62 cm), but the post spacing comes out
-  ~15 % longer (61 vs 53 cm) and uneven (54–66 cm), while the Polycam scan shows evenly
-  spaced posts. The phone's own position (ARKit) drifts when it is carried very low over a
-  uniform paved floor — there is little texture for it to track.
-* Each post is seen from both sides (there and back); with the drift its two halves land a
-  few cm apart, so post centres are only accurate to ~3–5 cm.
-* The phone itself passed post 4 closer than a 5 cm car would be allowed to — the human
-  "driver" was less careful than the planner.
+![robustness](docs/images/lidar/sim_robustness.png)
+
+| Sensor noise (position / heading) | Worst distance from path | Worst gap to a post | Collisions |
+|---|---|---|---|
+| 0.5 cm / 1° | 0.4 cm | 9.6 cm | 0 / 10 |
+| 1 cm / 2° | 1.1 cm | 9.1 cm | 0 / 10 |
+| 2 cm / 4° | 15.1 cm | 4.6 cm | 0 / 10 |
+| 3 cm / 6° | 22.0 cm | 4.3 cm | 0 / 10 |
+
+→ The car needs to know its position to about **1 cm**. From 2 cm it drifts up to 15–22 cm
+off the path.
+
+---
+
+## Camera vs LiDAR
+
+| | Camera (branch `main`) | LiDAR (this branch) |
+|---|---|---|
+| Input | one top-view photo (+ drive video) | 1661 depth frames + phone poses |
+| Must be known in advance | post spacing (for the scale) | only our car and the rules |
+| Posts found | 4 of 4 (office) | 5 of 5 (yard) |
+| Position accuracy | 2.6 cm vs hand labels (scale from the known spacing) | wall within 2 cm; spacing ≈ 15 % too long |
+| Sensitive to | light, shadows, white-on-white, furniture | phone position drift, low confidence on far points |
+| Real drive known | no (video: only left/right, 22–83 % of frames) | **yes** — compared with the plan |
+| Simulator | ideal, realistic, stress test | + wind, variable speed, car drawn on the map |
 
 ---
 
 ## Limitations
 
-* **Small, compressed data**: one top-view photo and one video, both compressed by WhatsApp.
-* **Shadows**: post 1 is partly in shadow → largest detection error (4.9 cm).
-* **Approximate sizes**: post diameter and camera height are estimates
-  (± 1 cm in diameter changes the gaps by ± 0.5 cm).
-* **Little room at the wall**: only 50 cm after post 4 — the car cannot straighten out
-  and stop there, so it turns around post 4 instead.
-* **Idealised simulator**: no wheel slip, the car body is checked by its width only; the
-  wind is a simple model (constant, along the corridor, no gusts). Real errors will be
-  larger than in the simulation.
-* **Video detection** depends on the light and fails with a busy background.
+* **Phone drift**: ARKit's position drifts when the phone is carried very low over a uniform
+  paved floor. The wall distance is right (64 vs 62 cm), but the post spacing comes out
+  ~15 % too long and uneven (54–66 cm) while the Polycam scan shows even spacing.
+* **Doubled posts**: each post is seen from both sides; with the drift its halves land a
+  few cm apart, so post centres are accurate to ~3–5 cm.
+* **One recording**, one yard, paper posts; only 17 % of the depth pixels have high confidence.
+* **Simple wind model**: constant wind along the corridor, no gusts; drag and drift
+  coefficients chosen for a toy car. It shows the direction of the effects, not exact numbers.
+* **Idealised car**: no wheel slip; the car body is checked by its width only.
 
 ---
 
@@ -510,31 +310,24 @@ The animation above shows this windy drive.
 
 ```
 .
-├── docker-compose.yml          main pipeline + "video" profile + "stats" tool
+├── docker-compose.yml          profiles: (default) camera, "video", "lidar", "tools"
 ├── docker/
-│   ├── Dockerfile.publisher    container 1 (Ubuntu 24.04 + ROS 2 Jazzy + minicar_publisher)
-│   ├── Dockerfile.processor    container 2 (+ minicar_processor + minicar_simulator)
-│   ├── processing.launch.py    starts processor + simulator in container 2
-│   ├── lidar.launch.py         starts lidar_mapper + simulator in container 2 (LiDAR version)
+│   ├── Dockerfile.publisher    container 1: Ubuntu 24.04 + ROS 2 Jazzy + minicar_publisher
+│   ├── Dockerfile.processor    container 2: + minicar_processor + minicar_simulator
+│   ├── lidar.launch.py         LiDAR version: lidar_mapper + car_simulator in container 2
+│   ├── processing.launch.py    camera version: processor + car_simulator
 │   └── entrypoint.sh
 ├── ros2_ws/src/
-│   ├── minicar_publisher/      top_view_publisher, video_publisher, lidar_replay (container 1)
-│   ├── minicar_processor/      core.py (detection, planning, checks), processor_node,
-│   │                           front_camera.py + video_checker_node (video version),
-│   │                           lidar_map.py + lidar_mapper_node (LiDAR version)
-│   └── minicar_simulator/      sim.py (car model, pure pursuit, noise), simulator_node
-├── data/                       the dataset (photos, video) + data/lidar_drive/ (iPhone LiDAR recording)
-├── scripts/
-│   ├── step1_look.py … step4_pipeline.py   how the solution was built, step by step (no ROS)
-│   ├── dataset_stats.py        dataset statistics → docs/
-│   ├── steering_sweep.py       which steering limit is enough
-│   └── update_docs.sh          copies result figures into docs/images
-├── docs/                       README figures, dataset_stats.json, steering_sweep.json
+│   ├── minicar_publisher/      lidar_replay_node (+ camera: publisher_node, video_publisher_node)
+│   ├── minicar_processor/      lidar_map.py, lidar_mapper_node.py, core.py (planner, shared)
+│   │                           (+ camera: processor_node, front_camera, video_checker_node)
+│   └── minicar_simulator/      sim.py (car, pure pursuit, noise, wind, variable speed), simulator_node
+├── data/lidar_drive/           the LiDAR recording + hand measurements + Polycam scan
+├── data/                       (camera dataset: photos, video)
+├── docs/                       figures, lidar_dataset_stats.json (+ camera statistics)
+├── scripts/                    helper scripts (camera steps 1–4, statistics, update_docs.sh)
 └── results/                    pipeline output (not in git)
 ```
-
-The scripts in `scripts/` run with a normal Python (numpy, scipy, matplotlib, Pillow);
-`dataset_stats.py` needs OpenCV and runs in Docker (`docker compose run --rm stats`).
 
 ## License
 

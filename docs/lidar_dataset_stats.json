@@ -1,0 +1,29 @@
+{
+  "frames": 1661,
+  "duration_s": 48.45,
+  "fps": 34.3,
+  "depth_size": [
+    256,
+    192
+  ],
+  "confidence_share_low_med_high": [
+    0.4,
+    0.434,
+    0.167
+  ],
+  "depth_high_conf_m_percentiles_5_50_95": [
+    0.15,
+    1.87,
+    23.89
+  ],
+  "phone_path_length_m": 10.6,
+  "phone_start_end_distance_m": 0.097,
+  "phone_height_range_cm": 11.7,
+  "phone_speed_mean_cm_s": 21.9,
+  "imu_samples": 4834,
+  "imu_rate_hz": 100.0,
+  "files_mb": {
+    "depth": 45,
+    "confidence": 13
+  }
+}
