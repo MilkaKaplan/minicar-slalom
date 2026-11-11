@@ -1,6 +1,7 @@
 # Minicar Slalom — LiDAR version (ROS 2 Jazzy in Docker)
 
 > **This is the LiDAR variant of the project.**
+>
 > The camera variant (top-view photo + drive video) is in branch
 > [`main`](https://github.com/MilkaKaplan/minicar-slalom/tree/main).
 >
