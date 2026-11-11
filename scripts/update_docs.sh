@@ -31,5 +31,5 @@ echo "docs/images updated"
 if [ -d results/lidar ]; then
   mkdir -p docs/images/lidar
   cp results/lidar/lidar_map.png results/lidar/lidar_drive.gif results/lidar/sim_realistic.png results/lidar/sim_robustness.png \
-     results/lidar/sim_realistic.gif docs/images/lidar/
+     results/lidar/sim_realistic.gif results/lidar/sim_windy.png docs/images/lidar/
 fi

@@ -314,7 +314,7 @@ def _style(a, track, res):
 
 
 def save_drive_animation(res, parts, track, car_xy_cm, out_gif, car_half_width_cm=2.5,
-                         car_length_cm=8.0, frames=120, fps=12):
+                         car_length_cm=8.0, frames=120, fps=12, title_text="Car on the LiDAR map"):
     """GIF: the simulated car drives the planned slalom ON the LiDAR map of the yard,
     next to the path the phone really took."""
     import matplotlib
@@ -360,7 +360,7 @@ def save_drive_animation(res, parts, track, car_xy_cm, out_gif, car_half_width_c
         xy = corners @ np.array([[c, s], [-s, c]]) + car[k]
         body.set_xy(xy[:, ::-1])                       # plot is (y, x)
         trail.set_data(car[: k + 1, 1], car[: k + 1, 0])
-        title.set_text(f"Car on the LiDAR map  ({100 * k // (len(car) - 1)} %)")
+        title.set_text(f"{title_text}  ({100 * k // (len(car) - 1)} %)")
         return body, trail, title
 
     FuncAnimation(fig, update, frames=frames, blit=False).save(out_gif, writer=PillowWriter(fps=fps))

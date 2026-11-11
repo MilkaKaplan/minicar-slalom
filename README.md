@@ -407,6 +407,9 @@ app while driving the phone ≈ 5–10 cm above the ground: there, U-turn, back.
 ```bash
 docker compose --profile lidar up --build --exit-code-from lidar_processing lidar_replay lidar_processing
 # results in results/lidar/
+# without wind / stronger wind:
+docker compose run --rm lidar_processing ros2 launch /ros2_ws/lidar.launch.py wind_cm_s:=0.0
+docker compose run --rm lidar_processing ros2 launch /ros2_ws/lidar.launch.py wind_cm_s:=600.0
 ```
 
 **How the map is built** (`minicar_processor/lidar_map.py`):
@@ -436,13 +439,41 @@ docker compose --profile lidar up --build --exit-code-from lidar_processing lida
 | **Real drive vs plan** (the phone's path) | **6.7 cm** apart on average, 21 cm at most |
 | Simulated realistic car | max 1.0 cm from the path, ≥ 9.1 cm from every post, no collision |
 
-**The simulated car driving the planned slalom on the LiDAR map** (orange), next to the
-path the phone really took (blue). The mapper sends the plan to the car simulator, gets the
+**The simulated car (with wind and variable speed, see below) driving the planned slalom on
+the LiDAR map** (orange), next to the path the phone really took (blue). The mapper sends the plan to the car simulator, gets the
 simulated drive back over `/sim/driven_path` and draws it on the map (`results/lidar/lidar_drive.gif`):
 
 <img src="docs/images/lidar/lidar_drive.gif" width="360">
 
 ![lidar sim](docs/images/lidar/sim_realistic.png)
+
+### Wind and variable speed
+
+The simulator can add the outside world (`wind_cm_s`, on by default in the LiDAR version):
+
+* **wind 3 m/s along the corridor**, from the wall to the start: **in the face** on the way
+  there, **in the back** on the way back. It slows down or pushes the car (air drag), and
+  when the car drives at an angle in the slalom or across in the U-turn, the side wind
+  **pushes it sideways**;
+* **variable speed**: like a driver, the car slows down before tight turns
+  (speed in a turn of radius R ≤ √(10 cm/s² · R)), speeds up on straighter parts, with
+  limited acceleration and braking. It starts from standstill.
+
+The animation above shows this windy drive.
+
+![windy](docs/images/lidar/sim_windy.png)
+
+| Drive on the LiDAR track | Time | Mean speed there / back | Max distance from path | Smallest gap to a post |
+|---|---|---|---|---|
+| Ideal, constant 20 cm/s | 42.7 s | 20 / 20 cm/s | 0.14 cm | 9.9 cm |
+| Realistic (sensor noise, slow steering) | 42.7 s | 20 / 20 cm/s | 0.96 cm | 9.1 cm |
+| **Realistic + wind 3 m/s + variable speed** | 83.3 s | **7.9 / 14.1 cm/s** | **2.25 cm** | **7.7 cm** |
+
+* The head wind almost **halves** the speed on the way there; the tail wind pushes the car
+  back faster than it wants to go (up to 27 cm/s).
+* The largest deviation is in the **U-turn**, where the car drives across the wind.
+* At **6 m/s** the air drag is stronger than the motor and the car cannot drive against the
+  wind at all (`ros2 launch /ros2_ws/lidar.launch.py wind_cm_s:=600.0`).
 
 **Honest notes**
 
@@ -465,8 +496,9 @@ simulated drive back over `/sim/driven_path` and draws it on the map (`results/l
   (± 1 cm in diameter changes the gaps by ± 0.5 cm).
 * **Little room at the wall**: only 50 cm after post 4 — the car cannot straighten out
   and stop there, so it turns around post 4 instead.
-* **Idealised simulator**: no wheel slip, constant speed, the car body is checked by its
-  width only. Real errors will be larger than in the simulation.
+* **Idealised simulator**: no wheel slip, the car body is checked by its width only; the
+  wind is a simple model (constant, along the corridor, no gusts). Real errors will be
+  larger than in the simulation.
 * **Video detection** depends on the light and fails with a busy background.
 
 ---

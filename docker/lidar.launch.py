@@ -17,6 +17,8 @@ def generate_launch_description():
         DeclareLaunchArgument("gap_cm", default_value="10.0"),
         DeclareLaunchArgument("corridor_width_cm", default_value="100.0"),
         DeclareLaunchArgument("max_steer_deg", default_value="30.0"),
+        DeclareLaunchArgument("wind_cm_s", default_value="300.0",
+                              description="wind along the corridor (in the face there, in the back back); 0 = calm"),
     ]
     mapper = Node(
         package="minicar_processor", executable="lidar_mapper_node", output="screen",
@@ -26,7 +28,8 @@ def generate_launch_description():
     simulator = Node(
         package="minicar_simulator", executable="simulator_node", output="screen",
         parameters=[{"output_dir": "/results/lidar", "wait_for_limits": True,
-                     "post_radius_cm": 3.5, "max_steer_deg": LaunchConfiguration("max_steer_deg")}],
+                     "post_radius_cm": 3.5, "max_steer_deg": LaunchConfiguration("max_steer_deg"),
+                     "wind_cm_s": LaunchConfiguration("wind_cm_s")}],
     )
     stop_when_mapper_ends = RegisterEventHandler(
         OnProcessExit(target_action=mapper, on_exit=[EmitEvent(event=Shutdown())])

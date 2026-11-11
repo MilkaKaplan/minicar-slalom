@@ -9,6 +9,9 @@ and drives a simulated car along the path (sim.py) in three ways:
                  -> sim_ideal.png, sim_ideal.gif
   2. REALISTIC   noisy position/heading sensor + slow steering motor (one drive)
                  -> sim_realistic.png, sim_realistic.gif
+  2b. WINDY      (if wind_cm_s > 0) realistic + wind along the corridor (in the face there,
+                 in the back back) + variable speed (slower before turns)
+                 -> sim_windy.png, sim_windy.gif
   3. ROBUSTNESS  many realistic drives with more and more sensor noise
                  -> sim_robustness.png
 
@@ -45,6 +48,8 @@ class CarSimulator(Node):
         self.declare_parameter("noise_pos_cm", sim.REALISTIC["noise_pos_cm"])
         self.declare_parameter("noise_heading_deg", sim.REALISTIC["noise_heading_deg"])
         self.declare_parameter("steer_rate_deg_s", sim.REALISTIC["steer_rate_deg_s"])
+        # Outside world (only if wind_cm_s > 0): wind + variable speed
+        self.declare_parameter("wind_cm_s", 0.0)
         # Robustness test
         self.declare_parameter("robustness_noise_levels_cm", [0.5, 1.0, 2.0, 3.0])
         self.declare_parameter("robustness_runs", 10)
@@ -62,6 +67,7 @@ class CarSimulator(Node):
         self.realistic = {"noise_pos_cm": p("noise_pos_cm"), "noise_heading_deg": p("noise_heading_deg"),
                           "steer_rate_deg_s": p("steer_rate_deg_s"), "seed": 0}
         self.out_dir = p("output_dir")
+        self.env = dict(sim.WINDY, wind_cm_s=float(p("wind_cm_s")))
         self.path_cm = None
         self.posts_cm = None
         self.limits = None              # (post_radius_cm, half_corridor_cm, wall_x_cm) from the map
@@ -91,15 +97,16 @@ class CarSimulator(Node):
         self.limits = tuple(float(v) for v in msg.data[:3])
         self.try_run(None)
 
-    def drive(self, name, realism, track):
+    def drive(self, name, realism, track, env=sim.CALM):
         """One drive: simulate, evaluate, save picture (+ GIF). Returns (log, numbers)."""
-        log = sim.simulate(self.path_cm, self.car, self.control, realism)
+        log = sim.simulate(self.path_cm, self.car, self.control, realism, env)
         ev = sim.evaluate(log, self.posts_cm, *track, self.car)
         self.get_logger().info(
             f"[{name}] finished={ev['finished']} tracking error mean={ev['tracking_error_mean_cm']} "
             f"max={ev['tracking_error_max_cm']} cm, min gap to posts={min(ev['gap_to_each_post_cm'])} cm, "
             f"no_collision={ev['no_collision']}")
-        label = {"ideal": "IDEAL car", "realistic": "REALISTIC car (noise + slow steering)"}[name]
+        label = {"ideal": "IDEAL car", "realistic": "REALISTIC car (noise + slow steering)",
+                 "windy": f"WINDY ({self.env['wind_cm_s'] / 100:g} m/s, variable speed)"}[name]
         sim.save_plot(log, self.path_cm, self.posts_cm, *track, ev,
                       os.path.join(self.out_dir, f"sim_{name}.png"), label=label)
         if self.get_parameter("make_gif").value:
@@ -124,6 +131,13 @@ class CarSimulator(Node):
 
         _, ideal = self.drive("ideal", sim.IDEAL, track)
         log, realistic = self.drive("realistic", self.realistic, track)
+        windy = None
+        if self.get_parameter("wind_cm_s").value > 0:
+            log, windy = self.drive("windy", self.realistic, track, self.env)   # this drive is published
+            windy["environment"] = self.env
+            self.get_logger().info(
+                f"[windy] speed there {windy['speed_mean_there_cm_s']} cm/s, back "
+                f"{windy['speed_mean_back_cm_s']} cm/s, time {windy['time_s']} s, finished={windy['finished']}")
 
         levels = list(self.get_parameter("robustness_noise_levels_cm").value)
         runs = int(self.get_parameter("robustness_runs").value)
@@ -156,11 +170,12 @@ class CarSimulator(Node):
                     "lookahead_cm": self.control["lookahead"]},
             "ideal": ideal,
             "realistic": realistic,
+            "windy": windy,
             "robustness": rows,
         }
         with open(os.path.join(self.out_dir, "sim_result.json"), "w") as f:
             json.dump(result, f, indent=2)
-        self.get_logger().info("Wrote sim_ideal.png/.gif, sim_realistic.png/.gif, sim_robustness.png, sim_result.json")
+        self.get_logger().info("Wrote sim_ideal, sim_realistic" + (", sim_windy" if windy else "") + " (.png/.gif), sim_robustness.png, sim_result.json")
         self.done = True
 
 

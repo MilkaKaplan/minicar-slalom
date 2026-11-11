@@ -38,6 +38,23 @@ REALISTIC = {
 }
 
 
+# Driving environment. CALM = constant speed, no wind (the earlier versions).
+CALM = {"wind_cm_s": 0.0, "variable_speed": False}
+WINDY = {
+    "wind_cm_s": 300.0,        # wind 3 m/s blowing along the corridor from the wall to the start:
+    "wind_dir_deg": 180.0,     #   in the face on the way there, in the back on the way back
+    "drag": 1.0e-4,            # how strongly the air slows/pushes the car (per (cm/s)^2)
+    "side_push": 0.01,         # sideways drift per cm/s of side wind (when driving at an angle)
+    "variable_speed": True,    # slow down before tight turns, speed up on straight parts
+    "max_speed": 25.0,         # cm/s
+    "min_speed": 4.0,          # cm/s
+    "max_side_accel": 10.0,    # cm/s^2: speed in a turn of radius R is at most sqrt(this * R)
+    "max_accel": 30.0,         # cm/s^2 motor
+    "max_brake": 40.0,         # cm/s^2 brakes
+    "look_ahead_speed_cm": 15.0,   # check the turns this far ahead
+}
+
+
 def min_turn_radius(car):
     return car["wheelbase"] / np.tan(np.radians(car["max_steer_deg"]))
 
@@ -50,13 +67,23 @@ def densify(path_xy, step=0.2):
     return np.column_stack([np.interp(s_new, s, path_xy[:, 0]), np.interp(s_new, s, path_xy[:, 1])])
 
 
-def simulate(path_xy, car=CAR, control=CONTROL, realism=IDEAL):
+def path_curvature(path):
+    """Curvature (1 / turn radius) at every point of a densified path."""
+    dx, dy = np.gradient(path[:, 0]), np.gradient(path[:, 1])
+    ddx, ddy = np.gradient(dx), np.gradient(dy)
+    return np.abs(dx * ddy - dy * ddx) / np.maximum((dx ** 2 + dy ** 2) ** 1.5, 1e-9)
+
+
+def simulate(path_xy, car=CAR, control=CONTROL, realism=IDEAL, env=CALM):
     """Drive along path_xy (N x 2, cm). Returns dict with the driven trajectory and
     per-step data: x, y, heading, steering angle, distance to the path.
 
     x, y, heading are where the car REALLY is. The controller only gets a noisy
     measurement of them (realism["noise_..."]); the wheels follow the controller's
-    command at most realism["steer_rate_deg_s"] degrees per second."""
+    command at most realism["steer_rate_deg_s"] degrees per second.
+
+    env adds the outside world: wind (slows down / pushes / drifts the car sideways) and
+    a variable speed (the car slows down before tight turns)."""
     path = densify(np.asarray(path_xy, dtype=float))
     L, dt, la = car["wheelbase"], control["dt"], control["lookahead"]
     max_steer = np.radians(car["max_steer_deg"])
@@ -70,7 +97,17 @@ def simulate(path_xy, car=CAR, control=CONTROL, realism=IDEAL):
     heading = np.arctan2(*(path[5] - path[0])[::-1])
     idx = 0                                   # how far along the path we are (index)
     window = int(30 / 0.2)                    # search the nearest point only 30 cm ahead
-    log = {"t": [], "x": [], "y": [], "heading": [], "steer_deg": [], "error": []}
+    log = {"t": [], "x": [], "y": [], "heading": [], "steer_deg": [], "error": [],
+           "speed": [], "speed_target": []}
+
+    variable = env.get("variable_speed", False)
+    v = 0.0 if variable else car["speed"]            # a car with variable speed starts standing
+    if variable:
+        curv = path_curvature(path)
+        ahead_n = int(env["look_ahead_speed_cm"] / 0.2)
+    w = env.get("wind_cm_s", 0.0)
+    wind = w * np.array([np.cos(np.radians(env.get("wind_dir_deg", 0.0))),
+                         np.sin(np.radians(env.get("wind_dir_deg", 0.0)))])
 
     t = 0.0
     while t < control["max_time"]:
@@ -105,13 +142,26 @@ def simulate(path_xy, car=CAR, control=CONTROL, realism=IDEAL):
         # the steering motor needs time: the wheels move towards the command step by step
         steer += float(np.clip(command - steer, -max_step, max_step))
 
-        # 5. move the car for dt seconds
-        v = car["speed"]
-        x += v * np.cos(heading) * dt
-        y += v * np.sin(heading) * dt
+        # 5. speed: slow down before tight turns, the wind slows down or pushes the car
+        h = np.array([np.cos(heading), np.sin(heading)])          # where the car points
+        if variable:
+            k_ahead = curv[idx: idx + ahead_n].max() if idx < len(curv) else 0.0
+            v_target = env["max_speed"] if k_ahead < 1e-6 else np.sqrt(env["max_side_accel"] / k_ahead)
+            v_target = float(np.clip(v_target, env["min_speed"], env["max_speed"]))
+            motor = np.clip(3.0 * (v_target - v), -env["max_brake"], env["max_accel"])
+            air = v - wind @ h                                     # air speed along the car
+            v = max(v + (motor - env["drag"] * air * abs(air)) * dt, 0.0)
+        else:
+            v_target = v
+
+        # 6. move the car for dt seconds (+ sideways drift from the side wind)
+        side = np.array([-h[1], h[0]])                             # car's left
+        drift = env.get("side_push", 0.0) * (wind @ side)
+        x += (v * h[0] + drift * side[0]) * dt
+        y += (v * h[1] + drift * side[1]) * dt
         heading += v / L * np.tan(steer) * dt
 
-        for k, val in zip(log, [t, x, y, heading, np.degrees(steer), error]):
+        for k, val in zip(log, [t, x, y, heading, np.degrees(steer), error, v, v_target]):
             log[k].append(float(val))
         t += dt
     log = {k: np.array(v) for k, v in log.items()}
@@ -125,7 +175,12 @@ def evaluate(log, posts_cm, post_r, half_corridor, wall_x, car=CAR):
     gaps = [float(np.min(np.hypot(x - px, y - py)) - post_r - car["half_width"]) for px, py in posts_cm]
     gap_side = float(half_corridor - np.max(np.abs(y)) - car["half_width"])
     gap_wall = float(wall_x - np.max(x) - car["half_width"])
+    k = int(np.argmax(x))                      # farthest point = U-turn: before = there, after = back
+    sp = log["speed"]
     return {
+        "speed_mean_there_cm_s": round(float(sp[:k].mean()), 1) if k > 0 else None,
+        "speed_mean_back_cm_s": round(float(sp[k:].mean()), 1),
+        "speed_min_max_cm_s": [round(float(sp[len(sp) // 20:].min()), 1), round(float(sp.max()), 1)],
         "finished": log["finished"],
         "time_s": round(float(log["t"][-1]), 2),
         "driven_length_cm": round(float(np.sum(np.hypot(np.diff(x), np.diff(y)))), 1),
@@ -175,12 +230,23 @@ def save_plot(log, path_xy, posts_cm, post_r, half_corridor, wall_x, ev, out_png
     ax1.set_title(f"{label}: car R_min = {ev['car_min_turn_radius_cm']} cm, {ok}")
     ax1.legend(loc="upper center", bbox_to_anchor=(0.5, -0.07), ncol=2, fontsize=8)
 
-    ax2 = fig.add_subplot(2, 2, 2)
+    ax2 = fig.add_subplot(3, 2, 2)
     ax2.plot(log["t"], log["error"], c="purple")
     ax2.set_ylabel("distance from path [cm]")
     ax2.set_title(f"Tracking error: mean {ev['tracking_error_mean_cm']} cm, max {ev['tracking_error_max_cm']} cm")
     ax2.grid(alpha=0.3)
-    ax3 = fig.add_subplot(2, 2, 4, sharex=ax2)
+    axv = fig.add_subplot(3, 2, 4, sharex=ax2)
+    axv.plot(log["t"], log["speed_target"], c="gray", lw=1, ls="--", label="wanted (slower before turns)")
+    axv.plot(log["t"], log["speed"], c="darkorange", label="actual")
+    turn_at = log["t"][int(np.argmax(log["x"]))]                 # farthest point = U-turn
+    axv.axvline(turn_at, c="red", lw=0.8)
+    axv.text(turn_at, max(log["speed"].max(), 1) * 1.02, " U-turn",
+             color="red", fontsize=8, va="bottom")
+    axv.set_ylabel("speed [cm/s]")
+    axv.set_title("Speed (there: before the U-turn line, back: after it)")
+    axv.legend(fontsize=7, loc="lower right")
+    axv.grid(alpha=0.3)
+    ax3 = fig.add_subplot(3, 2, 6, sharex=ax2)
     ax3.plot(log["t"], log["steer_deg"], c="teal")
     ax3.axhline(0, c="gray", lw=0.5)
     ax3.set_xlabel("time [s]")
