@@ -1,6 +1,9 @@
 # Minicar Slalom — LiDAR version (ROS 2 Jazzy in Docker)
 
-> **This is the LiDAR variant of the project.**
+> **This is the LiDAR variant with an explorer (branch `lidar-v3`).**
+> It is the LiDAR variant from branch
+> [`lidar-v2`](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v2) **plus a car that
+> drives the track without knowing it** — see [Unknown track: the explorer](#unknown-track-the-explorer).
 > The camera variant (top-view photo + drive video) is in branch
 > [`main`](https://github.com/MilkaKaplan/minicar-slalom/tree/main).
 
@@ -31,6 +34,7 @@ Known in advance are only **our car** (5 cm wide, wanted gap 10 cm) and the **ru
 - [Pipeline](#pipeline)
 - [How it works](#how-it-works)
 - [Results](#results) — incl. [wind and variable speed](#wind-and-variable-speed--the-conditions)
+- [Unknown track: the explorer](#unknown-track-the-explorer)
 - [Camera vs LiDAR](#camera-vs-lidar)
 - [Limitations](#limitations)
 - [Repository layout](#repository-layout)
@@ -59,6 +63,7 @@ Results appear in `results/lidar/`:
 | `path.csv` | the planned path as points `(part, x_cm, y_cm)` |
 | `sim_ideal`, `sim_realistic`, `sim_windy` `.png/.gif` | simulated drives |
 | `sim_robustness.png`, `sim_result.json` | 40 drives with more and more sensor noise |
+| `explore.png`, `explore.gif`, `explore_result.json` | the explorer: a car that drives the track without knowing it |
 
 Experiments without changing code:
 
@@ -166,7 +171,7 @@ start mark 93 cm before post 1, last post → wall 62 cm, post diameter ≈ 7 cm
 
 ## Pipeline
 
-Two containers (Ubuntu 24.04, ROS 2 Jazzy, Python 3.12), three ROS 2 nodes:
+Two containers (Ubuntu 24.04, ROS 2 Jazzy, Python 3.12), four ROS 2 nodes:
 
 ```
  ┌── container 1 ───────────────────┐                     ┌── container 2 ──────────────────────────────┐
@@ -180,6 +185,10 @@ Two containers (Ubuntu 24.04, ROS 2 Jazzy, Python 3.12), three ROS 2 nodes:
                                                           │  ideal, realistic, windy drives, stress test│
                                                           │  ─► /sim/driven_path ──► lidar_mapper draws │
                                                           │                          the car on the map │
+                                                          │ explorer                                    │
+                                                          │  /lidar/map = its world, seen through its   │
+                                                          │  own sensor → finds the track by itself     │
+                                                          │  ─► /explore/driven_path                    │
                                                           └─────────────────────────────────────────────┘
 ```
 
@@ -193,6 +202,8 @@ Two containers (Ubuntu 24.04, ROS 2 Jazzy, Python 3.12), three ROS 2 nodes:
 | `/slalom/posts` | `geometry_msgs/PoseArray` | mapper → simulator |
 | `/slalom/limits` | `std_msgs/Float32MultiArray` (post radius, corridor, wall) | mapper → simulator |
 | `/sim/driven_path` | `nav_msgs/Path` | simulator → mapper |
+| `/lidar/map` | `sensor_msgs/PointCloud2` (x, y, height; track frame) | mapper → explorer |
+| `/explore/driven_path` | `nav_msgs/Path` | explorer → (RViz, anyone) |
 
 Depth, confidence and pose of one frame carry the same timestamp; the mapper pairs them.
 The **car simulator is the same node as in the camera variant** — it does not care whether
@@ -345,6 +356,68 @@ off the path.
 
 ---
 
+## Unknown track: the explorer
+
+Everything above still uses a map that was built **after** the phone had already driven the
+whole slalom. At a competition the car arrives and has to find its way **the first time**.
+The **explorer** (`minicar_simulator/explorer.py`, node `explorer_node`, container 2) is a
+simulated car that does **not** know the track:
+
+* the LiDAR map is only its **world**; the car sees it through its **own virtual sensor**:
+  range **2 m**, field of view **60°** (like the iPhone), and **occlusion** — in every
+  direction it sees only the nearest surface, so a post hides the posts behind it;
+* known in advance are only the **rules** (start points along a 1 m corridor, posts on its
+  centre line) and **our car**.
+
+Every 0.05 s it does what a self-driving car does — **look → understand → decide → drive**:
+
+1. **look**: map points in the sensor cone, not hidden, become "seen";
+2. **understand**: posts = compact things 5–40 cm high on the centre line, standing in a line;
+   wall = an obstacle at least 50 cm wide across the corridor; posts behind the wall are pieces
+   of the wall. Seeing only the near side of a post, its centre is placed one radius further;
+3. **decide**: the first post is passed on the side with **more free room**; with every new post
+   the slalom is **re-planned** up to it (then straight on); when the wall is seen and the last
+   post is passed — the **final plan**: U-turn around the last post and slalom back;
+4. **drive**: kinematic bicycle + pure pursuit, 15 cm/s.
+
+Because a post seen from one side is known less precisely (up to ~9 cm), the explorer keeps
+a **bigger safety gap: 13 cm** instead of 10 cm (with 10 cm it passed two posts at ~1 cm).
+
+<img src="docs/images/lidar/explore.gif" width="360">
+
+*The yellow cone is the car's sensor. Grey: not seen yet; blue: seen; red: posts the car has
+found so far; dashed: its current plan, which changes as it discovers the track.*
+
+What happened (from `results/lidar/explore_result.json`):
+
+| Time | Event |
+|---|---|
+| 0.0 s | post 1 seen, **1.22 m** ahead (posts 2–5 are hidden behind it) → pass it on the **left** |
+| 5.3 s | post 2 seen, 1.15 m ahead → re-plan |
+| 5.8 s | post 3 seen, 1.64 m ahead → re-plan |
+| 7.5 s | post 4 seen, 2.00 m ahead → re-plan |
+| 18.1 s | post 5 and the **wall** seen, ~2 m ahead (for an instant a piece of the wall also looked like a post; it was dropped as soon as the wall was recognised) |
+| 26.9 s | last post passed → **final plan**: U-turn and back |
+| 60.1 s | back at the start |
+
+![explore](docs/images/lidar/explore.png)
+
+| | Explorer (unknown track) | Plan with the full map (known track) |
+|---|---|---|
+| Posts found | **5 of 5**, 2.6–6.2 cm from the map positions | 5 |
+| Wall | 428.9 cm | 427.5 cm |
+| Re-plans | 7 | — |
+| Path length | 901.5 cm | 854.7 cm |
+| Distance between the two paths | **2.6 cm** on average, 12 cm at most | — |
+| Smallest gap to a post | **6.9 cm** (planned 13) | 10.0 cm |
+| Collisions | **none** | none |
+
+The car found the whole track by itself and drove it only ~5 % longer than a car that knew
+the track in advance. This is a **rule-based** robot (perception → planning → control), not
+machine learning: every decision can be explained.
+
+---
+
 ## Camera vs LiDAR
 
 | | Camera (branch `main`) | LiDAR (this branch) |
@@ -388,12 +461,13 @@ ___
 ├── docker/
 │   ├── Dockerfile.publisher    container 1: Ubuntu 24.04 + ROS 2 Jazzy + minicar_publisher
 │   ├── Dockerfile.processor    container 2: + minicar_processor + minicar_simulator
-│   ├── lidar.launch.py         lidar_mapper + car_simulator in container 2
+│   ├── lidar.launch.py         lidar_mapper + car_simulator + explorer in container 2
 │   └── entrypoint.sh
 ├── ros2_ws/src/
 │   ├── minicar_publisher/      lidar_replay_node (container 1)
 │   ├── minicar_processor/      lidar_map.py, lidar_mapper_node.py, core.py (slalom planner)
-│   └── minicar_simulator/      sim.py (car, pure pursuit, noise, wind, variable speed), simulator_node
+│   └── minicar_simulator/      sim.py (car, pure pursuit, noise, wind, variable speed), simulator_node,
+│                               explorer.py + explorer_node (unknown track)
 ├── data/lidar_drive/           the LiDAR recording + hand measurements + Polycam scan
 ├── docs/                       figures, lidar_dataset_stats.json
 ├── scripts/                    lidar_dataset_stats.py (statistics and figures for this README)

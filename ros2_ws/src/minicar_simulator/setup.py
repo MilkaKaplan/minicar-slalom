@@ -15,5 +15,8 @@ setup(
     maintainer="MilkaKaplan",
     description="Simulated car (kinematic bicycle + pure pursuit) that drives the planned slalom path.",
     license="MIT",
-    entry_points={"console_scripts": ["simulator_node = minicar_simulator.simulator_node:main"]},
+    entry_points={"console_scripts": [
+        "simulator_node = minicar_simulator.simulator_node:main",
+        "explorer_node = minicar_simulator.explorer_node:main",
+    ]},
 )

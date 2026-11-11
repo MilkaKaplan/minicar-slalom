@@ -12,6 +12,7 @@ When the stream stops it:
   * waits for the simulated drive (/sim/driven_path) and draws the car driving on the
     LiDAR map: lidar_drive.gif. Then it exits.
 """
+import array
 import csv
 import json
 import os
@@ -24,7 +25,7 @@ from nav_msgs.msg import Path
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import CameraInfo, Image
+from sensor_msgs.msg import CameraInfo, Image, PointCloud2, PointField
 from std_msgs.msg import Float32MultiArray
 
 from . import core
@@ -72,6 +73,8 @@ class LidarMapper(Node):
         self.pub_path = self.create_publisher(Path, "/slalom/path", latched)
         self.pub_posts = self.create_publisher(PoseArray, "/slalom/posts", latched)
         self.pub_limits = self.create_publisher(Float32MultiArray, "/slalom/limits", latched)
+        # the map itself (track frame, metres, fields x, y, height): the "world" for the explorer
+        self.pub_map = self.create_publisher(PointCloud2, "/lidar/map", latched)
         self.create_subscription(Path, "/sim/driven_path", self.on_sim_drive, latched)
         self.sim_drive_cm = None
         self.plan = None
@@ -99,6 +102,24 @@ class LidarMapper(Node):
             self.n_added += 1
             if self.n_added % 100 == 0:
                 self.get_logger().info(f"{self.n_added} frames added to the map")
+
+    def publish_map(self, res, stamp):
+        """Map points above the ground, in the track frame (metres): x, y, height."""
+        t = res["to_track"](res["points"][:, [0, 2]])
+        h = res["height"]
+        m = (h > 0.03) & (h < 0.6) & (t[:, 0] > -0.3) & (np.abs(t[:, 1]) < 0.9)
+        rec = np.empty(int(m.sum()), dtype=[("x", "<f4"), ("y", "<f4"), ("height", "<f4")])
+        rec["x"], rec["y"], rec["height"] = t[m, 0], t[m, 1], h[m]
+        msg = PointCloud2()
+        msg.header.stamp, msg.header.frame_id = stamp, "track"
+        msg.height, msg.width = 1, len(rec)
+        msg.fields = [PointField(name=n, offset=4 * i, datatype=PointField.FLOAT32, count=1)
+                      for i, n in enumerate(("x", "y", "height"))]
+        msg.is_bigendian, msg.point_step = False, 12
+        msg.row_step, msg.is_dense = 12 * len(rec), True
+        msg.data = array.array("B", rec.tobytes())
+        self.pub_map.publish(msg)
+        self.get_logger().info(f"Published the map on /lidar/map: {len(rec)} points above the ground")
 
     def on_sim_drive(self, msg):
         self.sim_drive_cm = np.array([[ps.pose.position.x, ps.pose.position.y] for ps in msg.poses]) * 100
@@ -160,6 +181,7 @@ class LidarMapper(Node):
             ps.pose.orientation.w = 1.0
             path.poses.append(ps)
         self.pub_path.publish(path)
+        self.publish_map(res, stamp)
 
         os.makedirs(self.out_dir, exist_ok=True)
         lm.save_map_plot(res, parts, track, checks, cmp, os.path.join(self.out_dir, "lidar_map.png"))
