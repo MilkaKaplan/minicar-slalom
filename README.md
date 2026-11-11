@@ -371,8 +371,15 @@ off the path.
   coefficients chosen for a toy car. It shows the direction of the effects, not exact numbers.
 * **Idealised car**: no wheel slip; the car body is checked by its width only.
 
----
+___
 
+## AI assistance. 
+Code was written with the help of Claude (Anthropic) as a programming assistant. 
+The task, the track design, all data collection (photos, video, iPhone LiDAR recording) and the decisions on what to test - Milka Kaplan.
+
+Reviewed and ran every step was by Milka Kaplan.
+
+___
 ## Repository layout
 
 ```
