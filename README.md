@@ -1,41 +1,33 @@
-# Minicar Slalom — LiDAR version (ROS 2 Jazzy in Docker)
+# Minicar Slalom — the explorer: an unknown track (ROS 2 Jazzy in Docker)
 
-> **This is the LiDAR variant with an explorer (branch `lidar-v3`).**
-> It is the LiDAR variant from branch
-> [`lidar-v2`](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v2) **plus a car that
-> drives the track without knowing it** — see [Unknown track: the explorer](#unknown-track-the-explorer).
-> The camera variant (top-view photo + drive video) is in branch
-> [`main`](https://github.com/MilkaKaplan/minicar-slalom/tree/main).
+> **Branch `lidar-v3`.** A simulated car drives a slalom track it has **never seen before** and
+> finds its way by itself.
+> Other variants of this project: the camera (branch
+> [`main`](https://github.com/MilkaKaplan/minicar-slalom/tree/main)) and the LiDAR map of a track
+> driven in advance (branch [`lidar-v2`](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v2)).
 
+At a competition the car arrives at a track nobody has measured for it. It has to **find the
+posts, decide how to pass them, notice the end of the track, turn around and come back** —
+the first time it drives there.
 
-A small car has to drive a **slalom between posts, turn around at the end and slalom back**
-to the start, inside a 1 m wide corridor, without touching the posts.
+Known in advance are only the **rules** (the start points along a 1 m wide corridor, the
+posts stand on its centre line, slalom there, U-turn around the last post, slalom back on the
+other side) and **our car** (5 cm wide, max steering 30°, speed 15 cm/s).
 
-In the camera variant the track had to be **known in advance** (posts 50 cm apart) to turn
-pixels into centimetres. On a real competition track nobody tells you that. Here an
-**iPhone LiDAR** recording is used, and the system **measures the track itself**: it builds a
-3D map of the yard, finds the posts and the wall, plans the slalom, compares it with the
-real drive, and lets a simulated car drive it — with wind and variable speed.
+<img src="docs/images/lidar/explore.gif" width="380">
 
-Known in advance are only **our car** (5 cm wide, wanted gap 10 cm) and the **rules**
-(corridor 1 m wide).
-
-<img src="docs/images/lidar/lidar_drive.gif" width="360">
-
-*The simulated car (orange) driving the planned slalom on the LiDAR map of the yard, with a
-3 m/s wind and variable speed. Blue: the path the phone really took.*
+*The yellow cone is the car's sensor. Grey: not seen yet; blue: seen; red: the posts the car
+has found so far; dashed: its current plan, which changes as it discovers the track.*
 
 ---
 
 ## Contents
 - [Quick start](#quick-start)
 - [The task](#the-task)
-- [Dataset](#dataset)
+- [The world](#the-world)
 - [Pipeline](#pipeline)
-- [How it works](#how-it-works)
-- [Results](#results) — incl. [wind and variable speed](#wind-and-variable-speed--the-conditions)
-- [Unknown track: the explorer](#unknown-track-the-explorer)
-- [Camera vs LiDAR](#camera-vs-lidar)
+- [How the explorer works](#how-the-explorer-works)
+- [Results](#results)
 - [Limitations](#limitations)
 - [Repository layout](#repository-layout)
 
@@ -46,40 +38,25 @@ Known in advance are only **our car** (5 cm wide, wanted gap 10 cm) and the **ru
 Requirements: **Docker** with **Compose v2** (Docker Desktop on Mac/Windows).
 
 ```bash
-git clone -b lidar-v2 https://github.com/MilkaKaplan/minicar-slalom.git
+git clone -b lidar-v3 https://github.com/MilkaKaplan/minicar-slalom.git
 cd minicar-slalom
 docker compose --profile lidar up --build --exit-code-from lidar_processing lidar_replay lidar_processing
 ```
 
-The first build downloads ROS 2 Jazzy (~1 GB). The run takes about 2 minutes (most of it is
-drawing the animation). Both containers stop by themselves with exit code 0.
-Results appear in `results/lidar/`:
+The first build downloads ROS 2 Jazzy (~1 GB). The run takes about 2 minutes. Both containers
+stop by themselves with exit code 0. The explorer's results are in `results/lidar/`:
 
 | File | Content |
 |---|---|
-| `lidar_map.png` | the LiDAR map with the posts and wall found, the plan and the real drive |
-| `lidar_drive.gif` | the simulated car driving on the LiDAR map |
-| `lidar_result.json` | posts, distances, plan checks, real drive vs plan, LiDAR vs hand measurements |
-| `path.csv` | the planned path as points `(part, x_cm, y_cm)` |
-| `sim_ideal`, `sim_realistic`, `sim_windy` `.png/.gif` | simulated drives |
-| `sim_robustness.png`, `sim_result.json` | 40 drives with more and more sensor noise |
-| `explore.png`, `explore.gif`, `explore_result.json` | the explorer: a car that drives the track without knowing it |
+| `explore.gif` | the car exploring the unknown track |
+| `explore.png` | what the car saw and found; its path vs the plan with the full map |
+| `explore_result.json` | events (what was seen when), posts and wall found, re-plans, gaps, path length |
 
-Experiments without changing code:
+Experiments without changing code (in `docker/lidar.launch.py` the explorer node takes
+`sensor_range_cm`, `sensor_fov_deg` and `gap_cm` parameters).
 
-```bash
-# no wind / stronger wind (6 m/s: the car cannot drive against it)
-docker compose run --rm lidar_processing ros2 launch /ros2_ws/lidar.launch.py wind_cm_s:=0.0
-docker compose run --rm lidar_processing ros2 launch /ros2_ws/lidar.launch.py wind_cm_s:=600.0
-# a car that cannot steer as much
-docker compose run --rm lidar_processing ros2 launch /ros2_ws/lidar.launch.py max_steer_deg:=10.0
-
-# stop and clean up everything
-docker compose --profile lidar --profile video down --remove-orphans
-```
-
-If Docker says `network ... not found`, an old stopped container still points to a removed
-network: run the clean-up command above and start again.
+If Docker says `network ... not found`, run
+`docker compose --profile lidar down --remove-orphans` and start again.
 
 ---
 
@@ -94,357 +71,161 @@ network: run the clean-up command above and start again.
             ╭╯   ╰╮                ╳ the path crosses the post line between posts
             ╰──●──╯
               ...                  corridor 1 m wide
-            ╭──●──╮                first post: passed on one side on the way there,
-             ╲   ╱                             on the other side on the way back
-              ▲  start
+            ╭──●──╮
+             ╲   ╱
+              ▲  start             the car only knows: "the track goes straight ahead"
 ```
 
-1. **There**: slalom — post 1 on one side, post 2 on the other, …
-2. **U-turn** around the last post, without touching the wall behind it.
-3. **Back**: slalom to the start, passing every post on the **other** side (a figure of eight).
-4. Never touch the posts, the corridor edges or the wall.
+The car must not touch the posts, the corridor edges or the wall, and must come back to the start.
 
 ---
 
-## Dataset
+## The world
 
-A slalom in a paved yard: **5 paper posts** (Ø ≈ 7 cm), recorded with the iPhone LiDAR
-using the [Stray Scanner](https://apps.apple.com/app/stray-scanner/id1557051662) app while
-driving the phone ≈ 5–10 cm above the ground along the slalom: there, U-turn, back.
-Folder `data/lidar_drive/`, statistics in [`docs/lidar_dataset_stats.json`](docs/lidar_dataset_stats.json).
+To test the explorer it needs a world to drive in. The world is a **real track**: a slalom of
+**5 paper posts** (Ø ≈ 7 cm, ≈ 22 cm high) in a paved yard, recorded with the iPhone LiDAR
+([Stray Scanner](https://apps.apple.com/app/stray-scanner/id1557051662) app, folder
+`data/lidar_drive/`: 1661 depth frames 256 × 192, confidence, phone poses).
 
-| File | What it is |
-|---|---|
-| `depth/000000.png …` | **1661 depth frames**, 256 × 192 pixels, distance in mm (16-bit PNG) |
-| `confidence/…` | for every depth pixel: 0 = low, 1 = medium, 2 = high confidence |
-| `odometry.csv` | **phone pose** for every frame from ARKit: position (m) + orientation (quaternion) |
-| `camera_matrix.csv` | camera focal length and centre (for the 1920 × 1440 video) |
-| `imu.csv` | accelerometer + gyroscope, 100 Hz (recorded, not used) |
-| `measurements.json` | hand measurements — used **only to check** the result |
-| `polycam_top_view.webp` | the same track scanned with Polycam (illustration) |
+From this recording container 2 builds a 3D map of the yard (≈ 80 000 points above the
+ground, the map-building is described in branch
+[`lidar-v2`](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v2)). The map is the
+**world** for the explorer — the explorer never gets it as a whole, only what its own sensor
+would see from where it is.
 
-![depth](docs/images/lidar/depth_frames.png)
+<img src="docs/images/lidar/polycam_top_view.jpg" width="260">
 
-| Property | Value |
-|---|---|
-| Duration / frames | 48.5 s, 1661 frames (34 per second) |
-| Depth confidence | low 40 %, medium 43 %, **high 17 %** of the pixels |
-| Points used for the map | high confidence and closer than 2 m (see below why) |
-| Phone path | **10.6 m**; ends **9.7 cm** from where it started |
-| Phone height above the ground | ≈ 5 cm, varied by 12 cm during the drive |
-| Phone speed | 22 cm/s on average |
-
-### Distances and confidence of the depth pixels
-
-Statistics of 16.4 million depth pixels (every 5th frame), made by
-`scripts/lidar_dataset_stats.py`:
-
-![depth histograms](docs/images/lidar/depth_histograms.png)
-
-| | Value |
-|---|---|
-| Median distance of a depth pixel | **0.67 m** (25 % are closer than 15 cm) |
-| Pixels closer than 2 m | **64 %** |
-| Confidence of all pixels | low 40 %, medium 44 %, high **17 %** |
-| High confidence at 0.5–2 m | 20–29 % — the best range |
-| High confidence at 2–3.5 m | only 5–12 % — the worst range |
-
-What this shows:
-
-* **Most points are close**: the phone was only ≈ 5 cm above the ground, so a big part of
-  every frame is the floor right in front of it.
-* That floor is seen at a **very flat angle**, so its pixels are mostly *medium* confidence.
-* **High confidence** is most common for things **0.5–2 m away facing the phone** — exactly the
-  posts. Between 2 and 3.5 m it drops to 5–12 %. Beyond 4 m only large flat surfaces (fence,
-  wall) get high confidence again, and there the iPhone LiDAR is no longer accurate in distance
-  (in a first test with points up to 2.5 m, far points smeared the map into streaks).
-* That is why the map uses **only high-confidence points closer than 2 m**.
-
-**Hand measurements** (tape measure, approximate): 5 posts, ≈ 53 cm apart, corridor 1 m,
-start mark 93 cm before post 1, last post → wall 62 cm, post diameter ≈ 7 cm.
-
-<img src="docs/images/lidar/polycam_top_view.jpg" width="280">
-
-*The track scanned with Polycam (for illustration only, not used by the pipeline).*
+*The same track scanned with Polycam (illustration only).*
 
 ---
 
 ## Pipeline
 
-Two containers (Ubuntu 24.04, ROS 2 Jazzy, Python 3.12), four ROS 2 nodes:
+Two containers (Ubuntu 24.04, ROS 2 Jazzy, Python 3.12):
 
 ```
- ┌── container 1 ───────────────────┐                     ┌── container 2 ──────────────────────────────┐
- │ lidar_replay                     │ /phone/depth        │ lidar_mapper                                │
- │  plays data/lidar_drive/ like    │ /phone/confidence ─►│  frames → 3D map → ground → posts → wall    │
- │  live sensors (every 2nd frame)  │ /phone/pose         │  → plan slalom → compare with real drive    │
- │                                  │ /phone/camera_info  │  ─► /slalom/path, /slalom/posts,            │
- └──────────────────────────────────┘                     │     /slalom/limits ──────────────┐          │
-                                                          │                                  ▼          │
-                                                          │ car_simulator                               │
-                                                          │  ideal, realistic, windy drives, stress test│
-                                                          │  ─► /sim/driven_path ──► lidar_mapper draws │
-                                                          │                          the car on the map │
-                                                          │ explorer                                    │
-                                                          │  /lidar/map = its world, seen through its   │
-                                                          │  own sensor → finds the track by itself     │
-                                                          │  ─► /explore/driven_path                    │
-                                                          └─────────────────────────────────────────────┘
+ ┌── container 1 ─────────────────┐                    ┌── container 2 ───────────────────────────────┐
+ │ lidar_replay                   │ /phone/depth       │ lidar_mapper                                 │
+ │  plays the iPhone recording    │ /phone/confidence ►│  builds the 3D map of the yard = the WORLD   │
+ │  like live sensors             │ /phone/pose        │  ─► /lidar/map ─────────────┐                 │
+ │                                │ /phone/camera_info │  ─► /slalom/posts, /path,   │ (only to check  │
+ └────────────────────────────────┘                    │     /limits ────────────────┤  the result)    │
+                                                       │                             ▼                 │
+                                                       │ explorer                                      │
+                                                       │  sees the world only through its own sensor,  │
+                                                       │  finds posts and wall, plans, re-plans, drives│
+                                                       │  ─► /explore/driven_path                      │
+                                                       │  ─► results/lidar/explore.png/.gif/.json      │
+                                                       └───────────────────────────────────────────────┘
 ```
 
-| Topic | Message | From → to |
+| Topic | Message | Used by the explorer for |
 |---|---|---|
-| `/phone/depth` | `sensor_msgs/Image` 16UC1 (mm), 256 × 192 | replay → mapper |
-| `/phone/confidence` | `sensor_msgs/Image` mono8 | replay → mapper |
-| `/phone/pose` | `geometry_msgs/PoseStamped` (ARKit world) | replay → mapper |
-| `/phone/camera_info` | `sensor_msgs/CameraInfo` (latched) | replay → mapper |
-| `/slalom/path` | `nav_msgs/Path` (metres, frame `track`) | mapper → simulator |
-| `/slalom/posts` | `geometry_msgs/PoseArray` | mapper → simulator |
-| `/slalom/limits` | `std_msgs/Float32MultiArray` (post radius, corridor, wall) | mapper → simulator |
-| `/sim/driven_path` | `nav_msgs/Path` | simulator → mapper |
-| `/lidar/map` | `sensor_msgs/PointCloud2` (x, y, height; track frame) | mapper → explorer |
-| `/explore/driven_path` | `nav_msgs/Path` | explorer → (RViz, anyone) |
+| `/lidar/map` | `sensor_msgs/PointCloud2` (x, y, height) | **the world** it drives in |
+| `/slalom/posts`, `/slalom/path`, `/slalom/limits` | posts, plan and wall on the **full** map | **only to check** the result after the drive |
+| `/explore/driven_path` | `nav_msgs/Path` | its drive (output, for RViz or anyone) |
 
-Depth, confidence and pose of one frame carry the same timestamp; the mapper pairs them.
-The **car simulator is the same node as in the camera variant** — it does not care whether
-the path came from a photo or from a LiDAR map. That is what the ROS 2 topics are for.
+(Container 2 also still runs the full-map planner and car simulator from `lidar-v2`; they
+are needed here only as the reference to compare with.)
 
 ---
 
-## How it works
+## How the explorer works
 
-Code: `ros2_ws/src/minicar_processor/minicar_processor/lidar_map.py`.
+Code: `ros2_ws/src/minicar_simulator/minicar_simulator/explorer.py`, node `explorer_node`.
+Every **0.05 s** the car does what a self-driving car does — **look → understand → decide → drive**.
 
-**1. A 3D map from the frames.** Every high-confidence depth pixel closer than 2 m becomes a
-3D point in the camera, then — with the phone pose — a point in the world. All frames
-together: ≈ 250 000 points (one per 1 cm cube).
-*(First the camera axes were flipped the ARKit way and the map came out smeared into fans.
-Testing both conventions, the one with the flattest floor was right: 9 % of the points in
-the floor's height bin instead of 3 %.)*
+**1. Look — its own virtual LiDAR.**
+* range **2 m**, field of view **60°** (like the iPhone LiDAR);
+* **occlusion**: in every direction (1° wide) it sees only the nearest surface — a post hides
+  the posts behind it. From the start it sees **only the first post**;
+* everything it sees is remembered: its own map grows while it drives.
 
-**2. Ground.** The most common height is the floor; a plane fitted through it is
-**2 cm thick**, so the map is consistent.
+**2. Understand — what is in its own map.**
+* **posts** = compact things 5–40 cm high, on the corridor's centre line (± 20 cm), standing
+  **in a line** (a line is tried through every two candidates — RANSAC idea);
+* seeing only the near side of a post, the centre is placed **one radius further away**;
+* **wall** = an obstacle at least **50 cm wide** across the corridor (posts are narrow);
+  anything behind the wall is a piece of the wall, not a post.
 
-**3. Posts.** Compact things 5–40 cm above the ground, within 0.5 m of the drive, in 2 cm
-cells. Then two common-sense rules that need no track knowledge:
-* pieces closer than 20 cm are one object (merged);
-* slalom posts **stand in a line**: a line is tried through every pair of candidates
-  (RANSAC idea) and only candidates within 10 cm of the best line are kept.
+**3. Decide.**
+* **first post**: pass it on the side with **more free room** (fewer obstacles there);
+* **every new post** → **re-plan**: smooth S-curves through waypoints beside the posts seen so
+  far (alternating sides), then straight on along the post line;
+* **wall seen and last post passed** → **final plan**: U-turn around the last post and slalom
+  back, every post on the other side.
 
-7 candidates → **5 posts** (things near the start were rejected).
+**4. Drive.** Kinematic bicycle model (wheelbase 5 cm, max steering 30°) and a *pure pursuit*
+controller aiming 6 cm ahead on the current plan, 15 cm/s.
 
-**4. Wall.** Walking forward behind the last post in 2 cm steps, the wall is the first slice
-where obstacles cover **at least 50 cm across** the corridor (a stone or a leaf does not).
+**Safety margin.** A post seen from one side is known less precisely (up to ~9 cm). With a gap
+of 10 cm the explorer passed two posts at ~1 cm, so on an unknown track it keeps
+**13 cm** — like a careful driver on a road they don't know.
 
-**5. Track frame.** `x` = forward from the start along the post line, `y` = sideways
-(+ = left). The side of the first post is taken from the real drive.
+**Solving it step by step** (each problem found by looking at the result):
 
-**6. Plan and checks** — the same planner as the camera variant: waypoints
-`A = 3.5 + 10 + 2.5 = 16 cm` beside every post, smooth S-curves, U-turn around the last
-post, back on the other side; gaps to posts, corridor and wall along the whole path.
-
-**7. Car simulator** (`minicar_simulator/sim.py`): kinematic bicycle (wheelbase 5 cm,
-max steering 30° → smallest turn radius 8.7 cm), *pure pursuit* controller. Drives:
-
-* **ideal** — perfect sensors, constant 20 cm/s;
-* **realistic** — position sensor noise 1 cm, heading 2°, steering motor 120°/s;
-* **windy** — realistic + **wind 3 m/s** + **variable speed** (all conditions in
-  [Wind and variable speed](#wind-and-variable-speed--the-conditions));
-* **stress test** — 10 drives for each sensor noise 0.5 / 1 / 2 / 3 cm.
+| Problem | Fix |
+|---|---|
+| the sensor saw "through" posts (3 posts at once from the start) | occlusion: only the nearest surface in every direction |
+| a thing near the start and pieces of the wall were taken for posts | posts must be on the centre line and in a line; the wall is searched first, posts behind it are dropped |
+| the wall was searched behind a false post and found too late | search the wall anywhere after the first post |
+| passed two posts at ~1 cm | centre one radius behind the visible side + 13 cm safety gap |
 
 ---
 
 ## Results
 
-![lidar map](docs/images/lidar/lidar_map.png)
-
-### The track measured by the LiDAR
-
-| | LiDAR (automatic) | Hand measurement |
-|---|---|---|
-| Posts | **5 of 5** | 5 |
-| Last post → wall | **64 cm** | 62 cm |
-| Post spacing | 66 / 64 / 60 / 54 cm, mean **61 cm** | ≈ 53 cm |
-| Start of recording → post 1 | 119 cm | 93 cm (the recording started before the start mark) |
-| Ground flatness | ±2 cm | — |
-| Post height | 21–23 cm | — |
-
-**Side view of the LiDAR map** (only the corridor, |y| < 50 cm): the ground is flat within
-±2 cm, the five posts stick out 21–23 cm, the wall is at the end. The tall things near the
-start (x ≈ 30–40 cm) are outside the line of posts and were rejected.
-
-![side view](docs/images/lidar/side_view.png)
-
-### Plan vs the real drive
-
-| | Value |
-|---|---|
-| Planned path: smallest gap to a post | **10.0 cm** (as wanted) |
-| Planned path: gap to corridor edge / wall | 23.8 cm / 45.5 cm |
-| Tightest turn | 16–19 cm |
-| Path length | 855 cm |
-| **Real drive (phone) vs plan** | **6.7 cm** apart on average, 21 cm at most |
-| Real drive: smallest gap to post 4 | −1.6 cm (closer than a 5 cm car may go) |
-
-The human "driver" stayed close to the plan but was less careful than the planner.
-
-### Simulated drives
-
-Three drives of the same simulated car on the path planned from the LiDAR map:
-
-| Drive | Sensors | Speed | Outside world |
-|---|---|---|---|
-| **Ideal** | perfect | constant 20 cm/s | none |
-| **Realistic** | position noise 1 cm, heading noise 2°, steering motor 120°/s | constant 20 cm/s | none |
-| **Windy** | as realistic | **variable** | **wind 3 m/s** |
-
-### Wind and variable speed — the conditions
-
-**Wind** (`wind_cm_s = 300`, on by default in the LiDAR version):
-
-* blows **along the corridor, from the wall towards the start**, 3 m/s;
-* on the way **there** it is a **head wind**: the air drag slows the car down;
-* on the way **back** it is a **tail wind**: it pushes the car, faster than it wants to go;
-* in the slalom the car drives **at an angle** and in the U-turn **across** the wind: the side
-  part of the wind **pushes the car sideways** off its path, and the controller has to correct it;
-* air drag `a = 0.0001 · v_air · |v_air|` (cm/s²), where `v_air` = car speed minus the wind
-  along the car; sideways drift = `0.01 ×` side wind (cm/s); no gusts.
-
-**Variable speed** (like a driver):
-
-* the car starts **from standstill**;
-* it looks 15 cm ahead and **slows down before tight turns**: in a turn of radius R the
-  speed is at most √(10 cm/s² · R) — e.g. ~13 cm/s in the tightest 16 cm turns;
-* on straighter parts it **speeds up**, at most to 25 cm/s; never slower than 4 cm/s;
-* acceleration is limited to 30 cm/s², braking to 40 cm/s² — the speed cannot jump.
-
-### Results of the three drives
-
-| Realistic car (no wind, constant speed) | Windy car (wind 3 m/s, variable speed) |
-|---|---|
-| ![realistic](docs/images/lidar/sim_realistic.png) | ![windy](docs/images/lidar/sim_windy.png) |
-
-*Left of each figure: the drive on the map, coloured by the distance from the planned path.
-Right: distance from the path, **speed** (dashed = wanted, orange = actual; red line = U-turn)
-and steering angle over time.*
-
-| Drive | Time | Mean speed there / back | Max distance from path | Smallest gap to a post |
-|---|---|---|---|---|
-| Ideal, constant 20 cm/s | 42.7 s | 20 / 20 cm/s | 0.14 cm | 9.9 cm |
-| Realistic (sensor noise, slow steering) | 42.7 s | 20 / 20 cm/s | 0.96 cm | 9.1 cm |
-| **Realistic + wind 3 m/s + variable speed** | 83.3 s | **7.9 / 14.1 cm/s** | **2.25 cm** | **7.7 cm** |
-
-* The head wind almost **halves** the speed on the way there; the tail wind pushes the car
-  back faster than it wants to go (up to 27 cm/s).
-* The car slows down before every post (speed panel above).
-* The largest deviation is in the **U-turn**, where the car drives across the wind.
-* At **6 m/s** the air drag is stronger than the motor: the car cannot drive against the wind.
-
-### Robustness: how good must the car's position sensor be?
-
-![robustness](docs/images/lidar/sim_robustness.png)
-
-| Sensor noise (position / heading) | Worst distance from path | Worst gap to a post | Collisions |
-|---|---|---|---|
-| 0.5 cm / 1° | 0.4 cm | 9.6 cm | 0 / 10 |
-| 1 cm / 2° | 1.1 cm | 9.1 cm | 0 / 10 |
-| 2 cm / 4° | 15.1 cm | 4.6 cm | 0 / 10 |
-| 3 cm / 6° | 22.0 cm | 4.3 cm | 0 / 10 |
-
-→ The car needs to know its position to about **1 cm**. From 2 cm it drifts up to 15–22 cm
-off the path.
-
----
-
-## Unknown track: the explorer
-
-Everything above still uses a map that was built **after** the phone had already driven the
-whole slalom. At a competition the car arrives and has to find its way **the first time**.
-The **explorer** (`minicar_simulator/explorer.py`, node `explorer_node`, container 2) is a
-simulated car that does **not** know the track:
-
-* the LiDAR map is only its **world**; the car sees it through its **own virtual sensor**:
-  range **2 m**, field of view **60°** (like the iPhone), and **occlusion** — in every
-  direction it sees only the nearest surface, so a post hides the posts behind it;
-* known in advance are only the **rules** (start points along a 1 m corridor, posts on its
-  centre line) and **our car**.
-
-Every 0.05 s it does what a self-driving car does — **look → understand → decide → drive**:
-
-1. **look**: map points in the sensor cone, not hidden, become "seen";
-2. **understand**: posts = compact things 5–40 cm high on the centre line, standing in a line;
-   wall = an obstacle at least 50 cm wide across the corridor; posts behind the wall are pieces
-   of the wall. Seeing only the near side of a post, its centre is placed one radius further;
-3. **decide**: the first post is passed on the side with **more free room**; with every new post
-   the slalom is **re-planned** up to it (then straight on); when the wall is seen and the last
-   post is passed — the **final plan**: U-turn around the last post and slalom back;
-4. **drive**: kinematic bicycle + pure pursuit, 15 cm/s.
-
-Because a post seen from one side is known less precisely (up to ~9 cm), the explorer keeps
-a **bigger safety gap: 13 cm** instead of 10 cm (with 10 cm it passed two posts at ~1 cm).
-
-<img src="docs/images/lidar/explore.gif" width="360">
-
-*The yellow cone is the car's sensor. Grey: not seen yet; blue: seen; red: posts the car has
-found so far; dashed: its current plan, which changes as it discovers the track.*
-
-What happened (from `results/lidar/explore_result.json`):
+What happened (`results/lidar/explore_result.json`):
 
 | Time | Event |
 |---|---|
-| 0.0 s | post 1 seen, **1.22 m** ahead (posts 2–5 are hidden behind it) → pass it on the **left** |
-| 5.3 s | post 2 seen, 1.15 m ahead → re-plan |
-| 5.8 s | post 3 seen, 1.64 m ahead → re-plan |
-| 7.5 s | post 4 seen, 2.00 m ahead → re-plan |
-| 18.1 s | post 5 and the **wall** seen, ~2 m ahead (for an instant a piece of the wall also looked like a post; it was dropped as soon as the wall was recognised) |
+| 0.0 s | **post 1** seen, 1.22 m ahead — posts 2–5 are hidden behind it → pass it on the **left** (more room) |
+| 5.3 s | **post 2** seen, 1.15 m ahead → re-plan |
+| 5.8 s | **post 3** seen, 1.64 m ahead → re-plan |
+| 7.5 s | **post 4** seen, 2.00 m ahead → re-plan |
+| 18.1 s | the **wall** seen, 1.9 m ahead; for an instant pieces of it looked like posts, they were dropped as soon as the wall was recognised; **post 5** confirmed |
 | 26.9 s | last post passed → **final plan**: U-turn and back |
 | 60.1 s | back at the start |
 
 ![explore](docs/images/lidar/explore.png)
 
+*Left: what the car saw (blue) and never saw (grey), the posts and wall it found and its drive.
+Right: its drive (orange) vs the plan made with the full map (dashed); purple dots: moments
+when it saw something new and re-planned.*
+
 | | Explorer (unknown track) | Plan with the full map (known track) |
 |---|---|---|
 | Posts found | **5 of 5**, 2.6–6.2 cm from the map positions | 5 |
-| Wall | 428.9 cm | 427.5 cm |
+| Wall | 428.9 cm from the start | 427.5 cm |
+| First post passed on | left (chosen by free room) | left |
 | Re-plans | 7 | — |
 | Path length | 901.5 cm | 854.7 cm |
 | Distance between the two paths | **2.6 cm** on average, 12 cm at most | — |
 | Smallest gap to a post | **6.9 cm** (planned 13) | 10.0 cm |
+| Furthest from the centre line | 33.6 cm (corridor edge at 50 cm) | — |
 | Collisions | **none** | none |
+| Time | 60.1 s | — |
 
-The car found the whole track by itself and drove it only ~5 % longer than a car that knew
-the track in advance. This is a **rule-based** robot (perception → planning → control), not
-machine learning: every decision can be explained.
+**The car found the whole track by itself and drove it only ~5 % longer than a car that knew
+the track in advance.**
 
----
-
-## Camera vs LiDAR
-
-| | Camera (branch `main`) | LiDAR (this branch) |
-|---|---|---|
-| Input | one top-view photo (+ drive video) | 1661 depth frames + phone poses |
-| Must be known in advance | post spacing (for the scale) | only our car and the rules |
-| Posts found | 4 of 4 (office) | 5 of 5 (yard) |
-| Position accuracy | 2.6 cm vs hand labels (scale from the known spacing) | wall within 2 cm; spacing ≈ 15 % too long |
-| Sensitive to | light, shadows, white-on-white, furniture | phone position drift, low confidence on far points |
-| Real drive known | no (video: only left/right, 22–83 % of frames) | **yes** — compared with the plan |
-| Simulator | ideal, realistic, stress test | + wind, variable speed, car drawn on the map |
+This is a **rule-based** robot (perception → planning → control), not machine learning:
+every decision can be explained. A reinforcement-learning car would instead learn by trial
+and error over thousands of drives with a reward (progress +, collision −).
 
 ---
 
 ## Limitations
 
-* **Phone drift**: ARKit's position drifts when the phone is carried very low over a uniform
-  paved floor. The wall distance is right (64 vs 62 cm), but the post spacing comes out
-  ~15 % too long and uneven (54–66 cm) while the Polycam scan shows even spacing.
-* **Doubled posts**: each post is seen from both sides; with the drift its halves land a
-  few cm apart, so post centres are accurate to ~3–5 cm.
-* **One recording**, one yard, paper posts; only 17 % of the depth pixels have high confidence.
-* **Simple wind model**: constant wind along the corridor, no gusts; drag and drift
-  coefficients chosen for a toy car. It shows the direction of the effects, not exact numbers.
-* **Idealised car**: no wheel slip; the car body is checked by its width only.
+* **The world is a map, not live sensor data**: the explorer's sensor is simulated on the
+  LiDAR map of the yard. That map itself has the drift of the phone that recorded it (post
+  spacing ~15 % too long) and posts that look "doubled" (seen from both sides a few cm apart).
+* **Simple sensor model**: range, field of view and occlusion, but no noise, no missing points.
+* **Rules assumed**: the start points along the corridor and the posts stand on its centre line.
+* **One track**: 5 posts in a line; a curved or irregular track would need more general rules.
+* **Idealised car**: no wheel slip, constant speed, no sensor noise while driving.
 
-___
+---
 
 ## AI assistance
 Code was written with the help of Claude (Anthropic) as a programming assistant. 
@@ -457,7 +238,7 @@ ___
 
 ```
 .
-├── docker-compose.yml          profiles: "lidar" (the pipeline), "tools" (statistics)
+├── docker-compose.yml          profile "lidar": the pipeline
 ├── docker/
 │   ├── Dockerfile.publisher    container 1: Ubuntu 24.04 + ROS 2 Jazzy + minicar_publisher
 │   ├── Dockerfile.processor    container 2: + minicar_processor + minicar_simulator
@@ -465,12 +246,11 @@ ___
 │   └── entrypoint.sh
 ├── ros2_ws/src/
 │   ├── minicar_publisher/      lidar_replay_node (container 1)
-│   ├── minicar_processor/      lidar_map.py, lidar_mapper_node.py, core.py (slalom planner)
-│   └── minicar_simulator/      sim.py (car, pure pursuit, noise, wind, variable speed), simulator_node,
-│                               explorer.py + explorer_node (unknown track)
-├── data/lidar_drive/           the LiDAR recording + hand measurements + Polycam scan
-├── docs/                       figures, lidar_dataset_stats.json
-├── scripts/                    lidar_dataset_stats.py (statistics and figures for this README)
+│   ├── minicar_processor/      lidar_map.py, lidar_mapper_node.py (builds the world), core.py (planner)
+│   └── minicar_simulator/      explorer.py + explorer_node (the explorer),
+│                               sim.py + simulator_node (reference drive on the full map)
+├── data/lidar_drive/           the LiDAR recording of the track + hand measurements + Polycam scan
+├── docs/images/lidar/          figures for this README
 └── results/                    pipeline output (not in git)
 ```
 
