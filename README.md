@@ -30,7 +30,7 @@ Known in advance are only **our car** (5 cm wide, wanted gap 10 cm) and the **ru
 - [Dataset](#dataset)
 - [Pipeline](#pipeline)
 - [How it works](#how-it-works)
-- [Results](#results)
+- [Results](#results) — incl. [wind and variable speed](#wind-and-variable-speed--the-conditions)
 - [Camera vs LiDAR](#camera-vs-lidar)
 - [Limitations](#limitations)
 - [Repository layout](#repository-layout)
@@ -211,10 +211,8 @@ max steering 30° → smallest turn radius 8.7 cm), *pure pursuit* controller. D
 
 * **ideal** — perfect sensors, constant 20 cm/s;
 * **realistic** — position sensor noise 1 cm, heading 2°, steering motor 120°/s;
-* **windy** — realistic + **wind 3 m/s** along the corridor (in the face on the way there,
-  in the back on the way back, pushing sideways when the car drives at an angle) +
-  **variable speed**: the car slows down before tight turns (v ≤ √(10 cm/s² · R)),
-  speeds up on straighter parts, with limited acceleration and braking;
+* **windy** — realistic + **wind 3 m/s** + **variable speed** (all conditions in
+  [Wind and variable speed](#wind-and-variable-speed--the-conditions));
 * **stress test** — 10 drives for each sensor noise 0.5 / 1 / 2 / 3 cm.
 
 ---
@@ -248,7 +246,43 @@ The human "driver" stayed close to the plan but was less careful than the planne
 
 ### Simulated drives
 
-![windy](docs/images/lidar/sim_windy.png)
+Three drives of the same simulated car on the path planned from the LiDAR map:
+
+| Drive | Sensors | Speed | Outside world |
+|---|---|---|---|
+| **Ideal** | perfect | constant 20 cm/s | none |
+| **Realistic** | position noise 1 cm, heading noise 2°, steering motor 120°/s | constant 20 cm/s | none |
+| **Windy** | as realistic | **variable** | **wind 3 m/s** |
+
+### Wind and variable speed — the conditions
+
+**Wind** (`wind_cm_s = 300`, on by default in the LiDAR version):
+
+* blows **along the corridor, from the wall towards the start**, 3 m/s;
+* on the way **there** it is a **head wind**: the air drag slows the car down;
+* on the way **back** it is a **tail wind**: it pushes the car, faster than it wants to go;
+* in the slalom the car drives **at an angle** and in the U-turn **across** the wind: the side
+  part of the wind **pushes the car sideways** off its path, and the controller has to correct it;
+* air drag `a = 0.0001 · v_air · |v_air|` (cm/s²), where `v_air` = car speed minus the wind
+  along the car; sideways drift = `0.01 ×` side wind (cm/s); no gusts.
+
+**Variable speed** (like a driver):
+
+* the car starts **from standstill**;
+* it looks 15 cm ahead and **slows down before tight turns**: in a turn of radius R the
+  speed is at most √(10 cm/s² · R) — e.g. ~13 cm/s in the tightest 16 cm turns;
+* on straighter parts it **speeds up**, at most to 25 cm/s; never slower than 4 cm/s;
+* acceleration is limited to 30 cm/s², braking to 40 cm/s² — the speed cannot jump.
+
+### Results of the three drives
+
+| Realistic car (no wind, constant speed) | Windy car (wind 3 m/s, variable speed) |
+|---|---|
+| ![realistic](docs/images/lidar/sim_realistic.png) | ![windy](docs/images/lidar/sim_windy.png) |
+
+*Left of each figure: the drive on the map, coloured by the distance from the planned path.
+Right: distance from the path, **speed** (dashed = wanted, orange = actual; red line = U-turn)
+and steering angle over time.*
 
 | Drive | Time | Mean speed there / back | Max distance from path | Smallest gap to a post |
 |---|---|---|---|---|
