@@ -386,6 +386,7 @@ ___
 ## AI assistance. 
 Code was written with the help of Claude (Anthropic) as a programming assistant. 
 The task, the track design, all data collection (photos, video, iPhone LiDAR recording) and the decisions on what to test - Milka Kaplan.
+
 Reviewed and ran every step was by Milka Kaplan.
 
 ---
