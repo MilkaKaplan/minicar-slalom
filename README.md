@@ -12,12 +12,18 @@ the first time it drives there.
 
 Known in advance are only the **rules** (the start points along a 1 m wide corridor, the
 posts stand on its centre line, slalom there, U-turn around the last post, slalom back on the
-other side) and **our car** (5 cm wide, max steering 30°, speed 15 cm/s).
+other side) and **our car** (5 cm wide, max steering 30°).
+
+And it drives under **real conditions**, not in an ideal simulation: its position sensor is
+noisy, its steering motor is slow, a **3 m/s wind** blows along the track (in its face on the
+way there, in its back on the way back, from the side in the slalom), and it **changes its
+speed** like a driver — slower before tight turns.
 
 <img src="docs/images/lidar/explore.gif" width="380">
 
-*The yellow cone is the car's sensor. Grey: not seen yet; blue: seen; red: the posts the car
-has found so far; dashed: its current plan, which changes as it discovers the track.*
+*The drive with noise, slow steering, wind and variable speed. The yellow cone is the car's
+sensor. Grey: not seen yet; blue: seen; red: the posts the car has found so far; dashed: its
+current plan, which changes as it discovers the track.*
 
 ---
 
@@ -27,6 +33,7 @@ has found so far; dashed: its current plan, which changes as it discovers the tr
 - [The world](#the-world)
 - [Pipeline](#pipeline)
 - [How the explorer works](#how-the-explorer-works)
+- [Driving conditions](#driving-conditions)
 - [Results](#results)
 - [Limitations](#limitations)
 - [Repository layout](#repository-layout)
@@ -43,17 +50,20 @@ cd minicar-slalom
 docker compose --profile lidar up --build --exit-code-from lidar_processing lidar_replay lidar_processing
 ```
 
-The first build downloads ROS 2 Jazzy (~1 GB). The run takes about 2 minutes. Both containers
-stop by themselves with exit code 0. The explorer's results are in `results/lidar/`:
+The first build downloads ROS 2 Jazzy (~1 GB). The run takes about 3 minutes (the explorer
+drives the track 23 times: 3 drives + 20 stress-test drives). Both containers stop by
+themselves with exit code 0. The explorer's results are in `results/lidar/`:
 
 | File | Content |
 |---|---|
-| `explore.gif` | the car exploring the unknown track |
+| `explore.gif` | the car exploring the unknown track (windy drive) |
 | `explore.png` | what the car saw and found; its path vs the plan with the full map |
-| `explore_result.json` | events (what was seen when), posts and wall found, re-plans, gaps, path length |
+| `explore_conditions.png` | the three drives side by side: ideal, realistic, realistic + wind; speed and steering |
+| `explore_stress.png` | stress test: more and more sensor noise, 5 windy drives each |
+| `explore_result.json` | all three drives (events, posts, wall, re-plans, gaps, speeds) + stress test |
 
-Experiments without changing code (in `docker/lidar.launch.py` the explorer node takes
-`sensor_range_cm`, `sensor_fov_deg` and `gap_cm` parameters).
+Parameters of the explorer node (`docker/lidar.launch.py`): `sensor_range_cm`,
+`sensor_fov_deg`, `gap_cm`, `wind_cm_s` (0 = no wind), `stress_runs`.
 
 If Docker says `network ... not found`, run
 `docker compose --profile lidar down --remove-orphans` and start again.
@@ -156,7 +166,9 @@ Every **0.05 s** the car does what a self-driving car does — **look → unders
   back, every post on the other side.
 
 **4. Drive.** Kinematic bicycle model (wheelbase 5 cm, max steering 30°) and a *pure pursuit*
-controller aiming 6 cm ahead on the current plan, 15 cm/s.
+controller aiming 6 cm ahead on the current plan. The car looks 20 times a second and steers
+100 times a second, using its **noisy** idea of where it is — see
+[Driving conditions](#driving-conditions).
 
 **Safety margin.** A post seen from one side is known less precisely (up to ~9 cm). With a gap
 of 10 cm the explorer passed two posts at ~1 cm, so on an unknown track it keeps
@@ -170,22 +182,49 @@ of 10 cm the explorer passed two posts at ~1 cm, so on an unknown track it keeps
 | a thing near the start and pieces of the wall were taken for posts | posts must be on the centre line and in a line; the wall is searched first, posts behind it are dropped |
 | the wall was searched behind a false post and found too late | search the wall anywhere after the first post |
 | passed two posts at ~1 cm | centre one radius behind the visible side + 13 cm safety gap |
+| with noise and slow steering it sometimes hit post 4: one post (seen "doubled") was taken as two posts ~20 cm apart, so the car turned around the false "last post" too early | pieces closer than 30 cm along the line are one post (real posts are ~60 cm apart); turn around only if the last post is within 1.5 post spacings of the wall — otherwise an unseen post may still be there, keep driving and looking |
+
+---
+
+## Driving conditions
+
+The explorer drives the unknown track three times (same settings as the car simulator of
+branch `lidar-v2`):
+
+| Drive | Position sensor | Steering motor | Speed | Wind |
+|---|---|---|---|---|
+| **Ideal** | exact | instant | constant 15 cm/s | none |
+| **Realistic** | noise 1 cm, heading 2° | max 120°/s | constant 15 cm/s | none |
+| **Realistic + wind** (main result) | noise 1 cm, heading 2° | max 120°/s | **variable** | **3 m/s** |
+
+* **Noisy sensor**: every 0.01 s the car gets its position and heading with a random error
+  and steers by that (fixed random seeds, so the results are reproducible).
+* **Slow steering motor**: the wheels follow the command at most 120° per second.
+* **Wind 3 m/s along the corridor, from the wall towards the start**: a **head wind** on the way
+  there (air drag `0.0001 · v_air · |v_air|` slows the car), a **tail wind** on the way back
+  (it pushes the car), and when the car drives at an angle in the slalom or across in the
+  U-turn, the side part of the wind **pushes it sideways** (0.01 × side wind, cm/s).
+* **Variable speed**: the car starts from standstill, looks 15 cm ahead on its plan and slows
+  down before tight turns (v ≤ √(10 cm/s² · R)), speeds up to at most 25 cm/s on straighter
+  parts, acceleration ≤ 30 cm/s², braking ≤ 40 cm/s².
 
 ---
 
 ## Results
 
-What happened (`results/lidar/explore_result.json`):
+What happened in the main drive — noise, slow steering, wind, variable speed
+(`results/lidar/explore_result.json`, `windy`):
 
 | Time | Event |
 |---|---|
 | 0.0 s | **post 1** seen, 1.22 m ahead — posts 2–5 are hidden behind it → pass it on the **left** (more room) |
-| 5.3 s | **post 2** seen, 1.15 m ahead → re-plan |
-| 5.8 s | **post 3** seen, 1.64 m ahead → re-plan |
-| 7.5 s | **post 4** seen, 2.00 m ahead → re-plan |
-| 18.1 s | the **wall** seen, 1.9 m ahead; for an instant pieces of it looked like posts, they were dropped as soon as the wall was recognised; **post 5** confirmed |
-| 26.9 s | last post passed → **final plan**: U-turn and back |
-| 60.1 s | back at the start |
+| 4.2 s | **post 2** seen, 1.16 m ahead → re-plan |
+| 4.3 s | **post 3** seen, 1.70 m ahead → re-plan |
+| 5.8 s | **post 4** seen, 2.02 m ahead → re-plan |
+| 11.3 s | **post 5** seen, 1.88 m ahead → re-plan |
+| 14.9 s | the **wall** seen, 1.91 m ahead (for an instant a piece of it looked like a post; dropped as soon as the wall was recognised) |
+| 23.6 s | last post passed → **final plan**: U-turn and back |
+| 50.4 s | back at the start |
 
 ![explore](docs/images/lidar/explore.png)
 
@@ -193,21 +232,56 @@ What happened (`results/lidar/explore_result.json`):
 Right: its drive (orange) vs the plan made with the full map (dashed); purple dots: moments
 when it saw something new and re-planned.*
 
-| | Explorer (unknown track) | Plan with the full map (known track) |
+| | Explorer (unknown track, wind) | Plan with the full map (known track) |
 |---|---|---|
-| Posts found | **5 of 5**, 2.6–6.2 cm from the map positions | 5 |
-| Wall | 428.9 cm from the start | 427.5 cm |
+| Posts found | **5 of 5** | 5 |
+| Wall | 429.1 cm from the start | 427.5 cm |
 | First post passed on | left (chosen by free room) | left |
 | Re-plans | 7 | — |
-| Path length | 901.5 cm | 854.7 cm |
-| Distance between the two paths | **2.6 cm** on average, 12 cm at most | — |
-| Smallest gap to a post | **6.9 cm** (planned 13) | 10.0 cm |
-| Furthest from the centre line | 33.6 cm (corridor edge at 50 cm) | — |
+| Path length | 901.1 cm | 854.7 cm |
+| Distance between the two paths | **2.4 cm** on average, 6.6 cm at most | — |
+| Smallest gap to a post | **9.4 cm** (planned 13) | 10.0 cm |
+| Furthest from the centre line | 26.6 cm (corridor edge at 50 cm) | — |
 | Collisions | **none** | none |
-| Time | 60.1 s | — |
+| Time | 50.4 s | — |
 
-**The car found the whole track by itself and drove it only ~5 % longer than a car that knew
-the track in advance.**
+### Ideal vs realistic vs wind
+
+![conditions](docs/images/lidar/explore_conditions.png)
+
+| Drive | Time | Mean speed there / back | Path | Smallest gap to a post | Collision |
+|---|---|---|---|---|---|
+| Ideal | 59.9 s | 15 / 15 cm/s | 899 cm | 6.8 cm | none |
+| Realistic (noise + slow steering) | 60.6 s | 15 / 15 cm/s | 909 cm | **2.2 cm** | none |
+| Realistic + wind 3 m/s + variable speed | 50.4 s | **15.6 / 20.7 cm/s** | 901 cm | 9.4 cm | none |
+
+* The noisy sensor makes the steering **jittery** (right panel) and in this drive brings the car
+  to **2.2 cm** from the last post — much closer than the ideal car.
+* With wind, the car is **slower on the way there** (head wind) and **faster on the way back**
+  (tail wind pushes it up to 27 cm/s); it slows down before every post.
+* One drive of each says little about luck — hence the stress test.
+
+### Stress test: how good must the car's position sensor be?
+
+![stress](docs/images/lidar/explore_stress.png)
+
+5 windy drives (wind 3 m/s, slow steering, variable speed) for each noise level, each with a
+different random noise:
+
+| Sensor noise (position / heading) | Posts found | Worst gap to a post | Collisions |
+|---|---|---|---|
+| 0.5 cm / 1° | 5 in all drives | 5.2 cm | **0 / 5** |
+| 1 cm / 2° | 5 in all drives | 2.8 cm | **0 / 5** |
+| 2 cm / 4° | 5 in all drives | −1.3 cm | **2 / 5** |
+| 3 cm / 6° | 5 in all drives | −1.8 cm | **1 / 5** |
+
+→ On an unknown track with wind, the car needs to know its position to about **1 cm**; with
+2 cm or more it sometimes touches a post. The same limit as for the car that knew the track
+(branch `lidar-v2`).
+
+**The car found the whole track by itself, under wind and with noisy sensors, and drove it
+only ~5 % longer than a car that knew the track in advance — as long as its position sensor
+is accurate to about 1 cm.**
 
 This is a **rule-based** robot (perception → planning → control), not machine learning:
 every decision can be explained. A reinforcement-learning car would instead learn by trial
@@ -220,10 +294,15 @@ and error over thousands of drives with a reward (progress +, collision −).
 * **The world is a map, not live sensor data**: the explorer's sensor is simulated on the
   LiDAR map of the yard. That map itself has the drift of the phone that recorded it (post
   spacing ~15 % too long) and posts that look "doubled" (seen from both sides a few cm apart).
-* **Simple sensor model**: range, field of view and occlusion, but no noise, no missing points.
+* **Simple LiDAR model**: range, field of view and occlusion, but no noise or missing points in
+  the LiDAR itself; the car builds its own map with its true position (only the steering uses
+  the noisy position).
 * **Rules assumed**: the start points along the corridor and the posts stand on its centre line.
 * **One track**: 5 posts in a line; a curved or irregular track would need more general rules.
-* **Idealised car**: no wheel slip, constant speed, no sensor noise while driving.
+* **Simple car and wind models**: no wheel slip; constant wind without gusts; drag and drift
+  coefficients chosen for a toy car — they show the direction of the effects, not exact numbers.
+* **Few random drives**: 5 per noise level in the stress test; more drives would give more
+  reliable collision rates.
 
 ---
 

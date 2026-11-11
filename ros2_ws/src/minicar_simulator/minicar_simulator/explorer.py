@@ -26,7 +26,7 @@ CAR = {"half_width": 2.5, "wheelbase": 5.0, "max_steer_deg": 30.0, "speed": 15.0
        "gap": 13.0, "lookahead": 6.0}
 RULES = {"half_corridor": 50.0, "post_line_tol": 20.0, "post_r": 3.5}   # posts stand on the centre line (+-20 cm)
 DETECT = {"min_h": 5.0, "max_h": 40.0, "cell": 2.0, "min_cell_points": 2, "min_points": 15,
-          "max_size": 30.0, "merge": 20.0, "wall_width": 50.0}
+          "max_size": 30.0, "merge": 20.0, "merge_along": 30.0, "wall_width": 50.0}
 DT = 0.05
 
 
@@ -96,10 +96,13 @@ def find_posts(xyh, car_xy=None):
             u = c - np.asarray(car_xy)
             c = c + u / max(np.linalg.norm(u), 1e-6) * RULES["post_r"]
         found.append(c)
-    # pieces of the same post (seen from different angles) -> one post
+    # pieces of the same post (seen from different sides, a few cm apart because the map
+    # "doubles" posts) -> one post. Slalom posts stand far apart along the line, so two
+    # pieces closer than `merge_along` cm along the corridor are the same post.
     posts = []
     for p in sorted(found, key=lambda v: v[0]):
-        if posts and np.linalg.norm(posts[-1] - p) < DETECT["merge"]:
+        if posts and (abs(posts[-1][0] - p[0]) < DETECT["merge_along"]
+                      or np.linalg.norm(posts[-1] - p) < DETECT["merge"]):
             posts[-1] = (posts[-1] + p) / 2
         else:
             posts.append(p)
@@ -178,9 +181,27 @@ def _has_core():
 # ---------------------------------------------------------------------------
 # the drive
 # ---------------------------------------------------------------------------
-def explore(world_xyh, sensor=SENSOR, car=CAR, max_time=240.0, snapshot_every=0.5):
+def explore(world_xyh, sensor=SENSOR, car=CAR, max_time=240.0, snapshot_every=0.5,
+            realism=None, env=None, sub_steps=5):
     """Drive the unknown track. world_xyh: N x 3 map points (track frame, cm) above the ground.
+
+    realism (as in sim.py): position/heading sensor noise and a slow steering motor; the car
+    steers by its NOISY idea of where it is. env (as in sim.py): wind (head wind there, tail
+    wind back, side push) and variable speed (slower before tight turns).
+    Control runs every DT = 0.05 s, the car's motion in `sub_steps` smaller steps.
     Returns a log with the drive, events and snapshots for the animation."""
+    from . import sim
+    realism = realism or sim.IDEAL
+    env = env or sim.CALM
+    rng = np.random.default_rng(realism.get("seed", 0))
+    rate = realism.get("steer_rate_deg_s")
+    dt = DT / sub_steps
+    max_step = np.inf if rate is None else np.radians(rate) * dt
+    variable = env.get("variable_speed", False)
+    wind = env.get("wind_cm_s", 0.0) * np.array([np.cos(np.radians(env.get("wind_dir_deg", 0.0))),
+                                                 np.sin(np.radians(env.get("wind_dir_deg", 0.0)))])
+    v = 0.0 if variable else car["speed"]
+    steer = 0.0
     A = RULES["post_r"] + car["gap"] + car["half_width"]
     L, max_steer = car["wheelbase"], np.radians(car["max_steer_deg"])
     seen = np.zeros(len(world_xyh), bool)
@@ -189,7 +210,8 @@ def explore(world_xyh, sensor=SENSOR, car=CAR, max_time=240.0, snapshot_every=0.
     plan = plan_there([], 1, A, 0.0)
     final, there_len, idx = False, len(plan), 0
     events, replans = [], 0
-    log = {"t": [], "x": [], "y": [], "heading": []}
+    log = {"t": [], "x": [], "y": [], "heading": [], "speed": [], "speed_target": [], "steer_deg": []}
+    curv = sim.path_curvature(plan)
     snaps = []
     t, next_snap = 0.0, 0.0
     while t < max_time:
@@ -221,36 +243,67 @@ def explore(world_xyh, sensor=SENSOR, car=CAR, max_time=240.0, snapshot_every=0.
                     plan = plan_there(posts, side, A, line_y)                 # 4. re-plan
                     there_len, replans = len(plan), replans + 1
                     idx = int(np.argmin(np.hypot(plan[:, 0] - x, plan[:, 1] - y)))
+                    curv = sim.path_curvature(plan)
                 if posts and wall_x is None:
                     wall_x = find_wall(world_xyh[seen], posts[0][0])           # 5. wall? (anywhere after post 1)
                     if wall_x is not None:
                         events.append({"t": round(t, 2), "event": "wall seen",
                                        "wall_x_cm": round(wall_x, 1), "distance_cm": round(float(wall_x - x), 1)})
                         posts = [p for p in posts if p[0] < wall_x - 15]
-        if not final and wall_x is not None and x > posts[-1][0] - 20:
+        # turn around only when the last post is close to the wall: if there is more room than
+        # 1.5 post spacings, an unseen post may still be there -> keep driving and looking
+        spacing = np.mean(np.diff([p[0] for p in posts])) if len(posts) > 1 else 60.0
+        last_is_last = wall_x is not None and posts and (wall_x - posts[-1][0]) < 1.5 * spacing
+        if not final and last_is_last and x > posts[-1][0] - 20:
             plan, there_len = plan_full(posts, side, A)
             seg = plan[:there_len]
             idx = int(np.argmin(np.hypot(seg[:, 0] - x, seg[:, 1] - y)))
             final, replans = True, replans + 1
+            curv = sim.path_curvature(plan)
             events.append({"t": round(t, 2), "event": "final plan: U-turn around the last post and back"})
 
-        # 6. drive: pure pursuit on the current plan
-        win = plan[idx: idx + 60]
-        idx += int(np.argmin(np.hypot(win[:, 0] - x, win[:, 1] - y)))
-        if final and idx >= len(plan) - 3 and np.hypot(*(plan[-1] - [x, y])) < 3:
+        # 6. drive: perception runs every DT (20 Hz), steering and motion every dt (100 Hz).
+        #    The car only knows its position through a noisy sensor.
+        done_drive = False
+        for _ in range(sub_steps):
+            mx = x + (rng.normal(0, realism["noise_pos_cm"]) if realism["noise_pos_cm"] else 0.0)
+            my = y + (rng.normal(0, realism["noise_pos_cm"]) if realism["noise_pos_cm"] else 0.0)
+            mh = h + (np.radians(rng.normal(0, realism["noise_heading_deg"])) if realism["noise_heading_deg"] else 0.0)
+            win = plan[idx: idx + 60]
+            idx += int(np.argmin(np.hypot(win[:, 0] - mx, win[:, 1] - my)))
+            if final and idx >= len(plan) - 3 and np.hypot(*(plan[-1] - [mx, my])) < 3:
+                done_drive = True
+                break
+            ahead = plan[idx:]
+            far = np.nonzero(np.hypot(ahead[:, 0] - mx, ahead[:, 1] - my) >= car["lookahead"])[0]
+            tx, ty = ahead[far[0]] if len(far) else plan[-1]
+            alpha = np.arctan2(ty - my, tx - mx) - mh
+            alpha = np.arctan2(np.sin(alpha), np.cos(alpha))
+            command = float(np.clip(np.arctan2(2 * L * np.sin(alpha), car["lookahead"]), -max_steer, max_steer))
+            # wanted speed: slower before tight turns in the next 15 cm of the plan
+            if variable:
+                seg = np.hypot(*np.diff(plan[idx: idx + 400], axis=0).T)
+                n_ahead = int(np.searchsorted(np.cumsum(seg), env["look_ahead_speed_cm"])) + 1
+                k_ahead = float(curv[idx: idx + n_ahead].max()) if idx < len(curv) else 0.0
+                v_target = env["max_speed"] if k_ahead < 1e-6 else np.sqrt(env["max_side_accel"] / k_ahead)
+                v_target = float(np.clip(v_target, env["min_speed"], env["max_speed"]))
+            else:
+                v_target = car["speed"]
+            steer += float(np.clip(command - steer, -max_step, max_step))     # slow steering motor
+            hv = np.array([np.cos(h), np.sin(h)])
+            if variable:
+                motor = np.clip(3.0 * (v_target - v), -env["max_brake"], env["max_accel"])
+                air = v - wind @ hv                      # head wind slows, tail wind pushes
+                v = max(v + (motor - env["drag"] * air * abs(air)) * dt, 0.0)
+            left_dir = np.array([-hv[1], hv[0]])                # the car's left
+            drift = env.get("side_push", 0.0) * (wind @ left_dir)   # side wind pushes the car sideways
+            x += (v * hv[0] + drift * left_dir[0]) * dt
+            y += (v * hv[1] + drift * left_dir[1]) * dt
+            h += v / L * np.tan(steer) * dt
+        if done_drive:
             break
-        ahead = plan[idx:]
-        far = np.nonzero(np.hypot(ahead[:, 0] - x, ahead[:, 1] - y) >= car["lookahead"])[0]
-        tx, ty = ahead[far[0]] if len(far) else plan[-1]
-        alpha = np.arctan2(ty - y, tx - x) - h
-        alpha = np.arctan2(np.sin(alpha), np.cos(alpha))
-        steer = float(np.clip(np.arctan2(2 * L * np.sin(alpha), car["lookahead"]), -max_steer, max_steer))
-        v = car["speed"]
-        x += v * np.cos(h) * DT
-        y += v * np.sin(h) * DT
-        h += v / L * np.tan(steer) * DT
-        for k, val in zip(log, (t, x, y, h)):
-            log[k].append(val)
+        for k, val in zip(log, (t, x, y, h, v, v_target, np.degrees(steer))):
+            log[k].append(float(val))
         if t >= next_snap:
             snaps.append({"t": t, "k": len(log["t"]) - 1, "seen": seen.copy(), "posts": list(posts),
                           "plan": plan.copy(), "wall_x": wall_x, "final": final})
@@ -270,7 +323,12 @@ def evaluate(res, true_posts, true_wall_x, offline_plan=None):
     gaps = [float(np.min(np.hypot(x - px, y - py)) - RULES["post_r"] - CAR["half_width"]) for px, py in tp]
     found = np.asarray(res["posts"], float)
     err = [float(np.min(np.hypot(found[:, 0] - px, found[:, 1] - py))) for px, py in tp] if len(found) else []
+    k = int(np.argmax(x))                     # farthest point = U-turn
+    sp = lg["speed"]
     out = {
+        "speed_mean_there_cm_s": round(float(sp[:k].mean()), 1) if k > 0 else None,
+        "speed_mean_back_cm_s": round(float(sp[k:].mean()), 1),
+        "speed_min_max_cm_s": [round(float(sp[len(sp) // 20:].min()), 1), round(float(sp.max()), 1)],
         "finished": res["finished"],
         "time_s": round(float(lg["t"][-1]), 1),
         "path_length_cm": round(float(np.sum(np.hypot(np.diff(x), np.diff(y)))), 1),
@@ -399,4 +457,113 @@ def save_animation(world_xyh, res, out_gif, sensor=SENSOR, fps=10):
         return seen_sc, posts_sc, plan_ln, trail, body, cone, title
 
     FuncAnimation(fig, update, frames=len(snaps), blit=False).save(out_gif, writer=PillowWriter(fps=fps))
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# several drives: ideal vs realistic vs windy, and a stress test
+# ---------------------------------------------------------------------------
+def drive_conditions(world_xyh, true_posts, true_wall_x, offline_plan, sensor=SENSOR, car=CAR,
+                     wind_cm_s=300.0):
+    """Three drives of the explorer on the unknown track: ideal, realistic, realistic + wind."""
+    from . import sim
+    windy_env = dict(sim.WINDY, wind_cm_s=wind_cm_s)
+    out = {}
+    for name, real, env in [("ideal", sim.IDEAL, sim.CALM),
+                            ("realistic", sim.REALISTIC, sim.CALM),
+                            ("windy", sim.REALISTIC, windy_env)]:
+        res = explore(world_xyh, sensor=sensor, car=car, realism=real, env=env)
+        ev = evaluate(res, true_posts, true_wall_x, offline_plan)
+        ev["conditions"] = {"realism": {k: v for k, v in real.items() if k != "seed"},
+                            "wind_cm_s": env.get("wind_cm_s", 0.0), "variable_speed": env.get("variable_speed", False)}
+        out[name] = (res, ev)
+    return out
+
+
+def stress_test(world_xyh, true_posts, true_wall_x, offline_plan, sensor=SENSOR, car=CAR,
+                noise_levels_cm=(0.5, 1.0, 2.0, 3.0), runs=5, wind_cm_s=300.0):
+    """Windy drives with more and more sensor noise, several random seeds each."""
+    from . import sim
+    env = dict(sim.WINDY, wind_cm_s=wind_cm_s)
+    rows = []
+    for n in noise_levels_cm:
+        gaps, fails, found = [], 0, []
+        for seed in range(runs):
+            real = {"noise_pos_cm": n, "noise_heading_deg": 2 * n, "steer_rate_deg_s": 120.0, "seed": seed}
+            ev = evaluate(explore(world_xyh, sensor=sensor, car=car, realism=real, env=env),
+                          true_posts, true_wall_x, offline_plan)
+            gaps.append(min(ev["gap_to_each_post_cm"]))
+            found.append(ev["posts_found"])
+            fails += int(not (ev["no_collision"] and ev["finished"]))
+        rows.append({"noise_pos_cm": n, "noise_heading_deg": 2 * n, "runs": runs,
+                     "posts_found": sorted(set(found)), "gap_worst_cm": round(float(min(gaps)), 1),
+                     "gap_mean_cm": round(float(np.mean(gaps)), 1), "collisions": fails})
+    return rows
+
+
+def save_conditions_plot(world_xyh, drives, true_posts, offline_plan, out_png):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    labels = {"ideal": "IDEAL\nexact sensors, constant speed, no wind",
+              "realistic": "REALISTIC\nsensor noise 1 cm / 2 deg, slow steering",
+              "windy": "REALISTIC + WIND 3 m/s\n+ variable speed"}
+    fig = plt.figure(figsize=(16, 9))
+    for i, name in enumerate(("ideal", "realistic", "windy")):
+        res, ev = drives[name]
+        a = fig.add_subplot(1, 4, i + 1)
+        a.scatter(world_xyh[:, 1], world_xyh[:, 0], s=0.2, c="#e6e6e6")
+        for px, py in true_posts:
+            a.add_patch(plt.Circle((py, px), RULES["post_r"], color="gray"))
+        a.plot(offline_plan[:, 1], offline_plan[:, 0], "--", c="black", lw=0.8)
+        a.plot(res["log"]["y"], res["log"]["x"], c="orange", lw=1.8)
+        ok = "no collision" if ev["no_collision"] else "COLLISION"
+        a.set_title(f"{labels[name]}\nmin gap {min(ev['gap_to_each_post_cm'])} cm, {ok}", fontsize=9)
+        _ax_track(a, res["wall_x"])
+    a = fig.add_subplot(2, 4, 4)
+    for name, c in (("realistic", "teal"), ("windy", "darkorange")):
+        lg = drives[name][0]["log"]
+        a.plot(lg["t"], lg["speed"], c=c, label=name)
+    lg = drives["windy"][0]["log"]
+    turn = lg["t"][int(np.argmax(lg["x"]))]
+    a.axvline(turn, c="red", lw=0.8)
+    a.text(turn, a.get_ylim()[1], " U-turn (windy)", color="red", fontsize=8, va="top")
+    a.set_xlabel("time [s]")
+    a.set_ylabel("speed [cm/s]")
+    a.set_title("Speed: head wind there, tail wind back,\nslower before posts", fontsize=9)
+    a.legend(fontsize=8)
+    a.grid(alpha=0.3)
+    a = fig.add_subplot(2, 4, 8)
+    for name, c in (("realistic", "teal"), ("windy", "darkorange")):
+        lg = drives[name][0]["log"]
+        a.plot(lg["t"], lg["steer_deg"], c=c, lw=0.8, label=name)
+    a.set_xlabel("time [s]")
+    a.set_ylabel("steering [deg]")
+    a.set_title("Steering (slow motor, noisy sensors)", fontsize=9)
+    a.grid(alpha=0.3)
+    fig.suptitle("The explorer on the unknown track under three conditions "
+                 "(orange: its drive, dashed: plan with the full map)")
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=85)
+    plt.close(fig)
+
+
+def save_stress_plot(rows, out_png):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    labels = [f"{r['noise_pos_cm']} cm\n{r['noise_heading_deg']} deg" for r in rows]
+    gaps = [r["gap_worst_cm"] for r in rows]
+    fig, ax = plt.subplots(figsize=(7, 4.2))
+    ax.bar(labels, gaps, color=["green" if g > 0 else "red" for g in gaps], alpha=0.7)
+    ax.axhline(0, c="black", lw=1)
+    for i, r in enumerate(rows):
+        ax.text(i, max(gaps[i], 0) + 0.3, f"{r['collisions']}/{r['runs']} hit", ha="center", fontsize=9)
+    ax.set_ylim(min(min(gaps), 0) - 1.5, max(gaps) + 2)
+    ax.set_xlabel("position / heading sensor noise")
+    ax.set_ylabel("worst gap car side -> post [cm]")
+    ax.set_title(f"Explorer stress test: unknown track, wind 3 m/s, {rows[0]['runs']} drives per level")
+    ax.grid(alpha=0.3, axis="y")
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=90)
     plt.close(fig)
