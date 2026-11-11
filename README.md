@@ -6,7 +6,7 @@
 > simulated car with wind and variable speed drives on the LiDAR map - is in branch
 > [**`lidar-v2`**](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v2).
 >
-> A THIRD variant with simulation of a car that **does not know** the route and its trajectory on the LiDAR map - in the section
+> A SUB-SECOND variant with simulation of a car that **does not know** the route and its trajectory on the LiDAR map - in the section
 > [**`lidar-v3`**](https://github.com/MilkaKaplan/minicar-slalom/tree/lidar-v3)
 
 A toy autonomous-driving pipeline: a small car has to drive a **slalom between 4 posts,
@@ -290,7 +290,7 @@ For a sine-like slalom the tightest turn is
 (d = post spacing, A = sideways swing). With d = 50 cm and A = 19 cm: R ≈ 13 cm; the
 detected spacings 54 / 48 / 48 cm give the 12 cm above. Doubling the spacing to 1 m
 would make the turns **4× gentler** (R ≈ 53 cm). A smaller gap to the posts also makes
-the turns gentler, but leaves less safety margin — a trade-off.
+the turns gentler, but leaves less safety margin - a trade-off.
 
 ### Simulated drives
 
@@ -360,13 +360,13 @@ container 1: video_publisher ── /camera/front (Image, 10 frames per video se
 | back (windows, chairs) | **22 %** |
 | end | 67 % |
 
-**Honest result:** on the way there the camera clearly sees the slalom — the nearest
+**Honest result:** on the way there the camera clearly sees the slalom - the nearest
 post slides to the left edge, then the next one to the right, and so on. On the way back
 the light from the windows changes the colours and white chair legs look like posts,
 so the detector misses most posts. The left/right sequence is therefore **not reliable
 enough** to confirm the planned slalom from the video.
 
-The video does **not** steer the car — the path comes from the top view. In a real car
+The video does **not** steer the car - the path comes from the top view. In a real car
 a live front camera could correct the car's position using the posts as landmarks
 (*localization*), which is exactly what the robustness test asks for (≈ 1 cm accuracy).
 That would need coloured posts or a trained detector.
