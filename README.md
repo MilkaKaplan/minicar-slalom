@@ -75,9 +75,12 @@ docker compose run --rm stats
 docker compose run --rm processor ros2 launch /ros2_ws/processing.launch.py max_steer_deg:=10.0
 docker compose run --rm processor ros2 launch /ros2_ws/processing.launch.py gap_cm:=5.0
 
-# Stop everything
-docker compose down
+# Stop everything (all versions)
+docker compose --profile lidar --profile video down --remove-orphans
 ```
+
+If Docker says `network ... not found`, an old stopped container still points to a network
+that was removed. Clean up with the "stop everything" command above and run again.
 
 ---
 
